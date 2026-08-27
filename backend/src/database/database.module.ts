@@ -17,6 +17,11 @@ import { ENTITIES } from './entities';
         username: config.postgres.user,
         password: config.postgres.password,
         database: config.postgres.database,
+        // Postgres 13+ ships gen_random_uuid() in core; pgcrypto (enabled
+        // in the first migration) covers older versions too. Without this,
+        // TypeORM defaults uuid primary columns to uuid_generate_v4(),
+        // which needs the uuid-ossp extension instead.
+        uuidExtension: 'pgcrypto' as const,
         synchronize: false,
         autoLoadEntities: false,
         entities: ENTITIES,

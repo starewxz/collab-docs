@@ -1,6 +1,6 @@
 # Collab Docs
 
-A Notion-like collaborative document workspace. **This repository is at Stage 1: foundation, architecture, and infrastructure only.** No business features (auth, workspaces, documents, real-time collaboration, comments, billing, search, file upload) are implemented yet — this stage exists so later stages can start immediately on solid ground.
+A Notion-like collaborative document workspace. **Stages 1 (foundation/infrastructure) and 2 (auth, workspaces, RBAC, invitations) are complete.** Documents, real-time collaboration, comments, billing, search, and file upload are not implemented yet. See `docs/ai/` for the current, verified implementation state — this README is not kept in lockstep with every stage.
 
 ## Stack
 
@@ -159,4 +159,4 @@ npm test         # vitest, unit-level only
 
 ## What's not here yet
 
-By design, Stage 1 does not include: authentication, user/workspace/document entities or CRUD, Yjs/CRDT collaboration, comments, billing, search indexing, or file upload endpoints. Those land in later stages on top of this foundation.
+Auth, users, workspaces, RBAC, and invitations are implemented (Stage 2). Not yet implemented: documents/document CRUD, Yjs/CRDT collaboration, comments, billing, search indexing, and file upload endpoints. See `docs/ai/02-current-state.md` for the verified, detailed breakdown and `docs/ai/07-roadmap.md` for what's next.

@@ -32,9 +32,12 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Collab Docs API')
     .setDescription(
-      'Foundation stage API. Business modules (auth, workspaces, documents, collaboration, ...) arrive in later stages.',
+      'Stage 2: auth, users, workspaces, membership/RBAC, and invitations. ' +
+        'Documents, Yjs collaboration, comments, billing, and search arrive in later stages. ' +
+        'Non-member access to a workspace returns 404 (not 403) to avoid disclosing its existence; ' +
+        'insufficient role for an action you can otherwise see returns 403.',
     )
-    .setVersion('0.1.0')
+    .setVersion('0.2.0')
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);

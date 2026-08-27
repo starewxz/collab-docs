@@ -3,6 +3,14 @@ export interface AppConfig {
   port: number;
   frontendUrl: string;
   backendUrl: string;
+  /**
+   * Unset by default (host-only cookie - correct for localhost dev, where
+   * the frontend/backend share a hostname across different ports). Set to
+   * a shared parent domain (e.g. ".example.com") in production if the
+   * frontend and backend live on different subdomains, so proxy.ts can
+   * still see the refresh cookie for its optimistic redirect check.
+   */
+  cookieDomain?: string;
 }
 
 export interface PostgresConfig {
@@ -28,8 +36,10 @@ export interface MinioConfig {
 }
 
 export interface JwtConfig {
-  accessSecret?: string;
-  refreshSecret?: string;
+  accessSecret: string;
+  accessExpiresInSeconds: number;
+  refreshSecret: string;
+  refreshExpiresInSeconds: number;
 }
 
 export interface Configuration {
@@ -46,6 +56,7 @@ export default (): Configuration => ({
     port: parseInt(process.env.PORT ?? '4000', 10),
     frontendUrl: process.env.FRONTEND_URL!,
     backendUrl: process.env.BACKEND_URL!,
+    cookieDomain: process.env.COOKIE_DOMAIN || undefined,
   },
   postgres: {
     host: process.env.POSTGRES_HOST!,
@@ -67,7 +78,15 @@ export default (): Configuration => ({
     useSSL: process.env.MINIO_USE_SSL === 'true',
   },
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET,
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    accessSecret: process.env.JWT_ACCESS_SECRET!,
+    accessExpiresInSeconds: parseInt(
+      process.env.JWT_ACCESS_EXPIRES_IN_SECONDS ?? '900',
+      10,
+    ),
+    refreshSecret: process.env.JWT_REFRESH_SECRET!,
+    refreshExpiresInSeconds: parseInt(
+      process.env.JWT_REFRESH_EXPIRES_IN_SECONDS ?? String(60 * 60 * 24 * 30),
+      10,
+    ),
   },
 });

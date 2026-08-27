@@ -1,0 +1,80 @@
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workspaceList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.workspaceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+}
+
+.workspaceName {
+  font-weight: 500;
+}
+
+.workspaceRole {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.createForm {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.createForm input {
+  flex: 1;
+}
+
+.invitationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  gap: var(--space-3);
+}
+
+.invitationInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.invitationActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.statusBadge {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 13px;
+}

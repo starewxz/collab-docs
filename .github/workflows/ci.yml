@@ -80,6 +80,8 @@ jobs:
           MINIO_BUCKET: collab-docs
           FRONTEND_URL: http://localhost:3000
           BACKEND_URL: http://localhost:4000
+          JWT_ACCESS_SECRET: ci-access-secret-please-do-not-use-in-prod-0000
+          JWT_REFRESH_SECRET: ci-refresh-secret-please-do-not-use-in-prod-000
 
   frontend:
     runs-on: ubuntu-latest

@@ -7,6 +7,7 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(4000),
   FRONTEND_URL: Joi.string().uri().required(),
   BACKEND_URL: Joi.string().uri().required(),
+  COOKIE_DOMAIN: Joi.string().allow('').optional(),
 
   POSTGRES_HOST: Joi.string().required(),
   POSTGRES_PORT: Joi.number().default(5432),
@@ -24,9 +25,9 @@ export const envValidationSchema = Joi.object({
   MINIO_BUCKET: Joi.string().required(),
   MINIO_USE_SSL: Joi.boolean().default(false),
 
-  // Consumed starting Stage 2 (JWT auth). Optional (and allowed blank) so
-  // Stage 1 can start without them, but the architecture already reserves
-  // the shape.
-  JWT_ACCESS_SECRET: Joi.string().allow('').optional(),
-  JWT_REFRESH_SECRET: Joi.string().allow('').optional(),
+  // Stage 2: auth is now real, so these are required.
+  JWT_ACCESS_SECRET: Joi.string().min(32).required(),
+  JWT_ACCESS_EXPIRES_IN_SECONDS: Joi.number().default(900),
+  JWT_REFRESH_SECRET: Joi.string().min(32).required(),
+  JWT_REFRESH_EXPIRES_IN_SECONDS: Joi.number().default(60 * 60 * 24 * 30),
 });

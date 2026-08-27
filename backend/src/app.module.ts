@@ -9,6 +9,9 @@ import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
 import { HealthModule } from './health/health.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { UsersModule } from './modules/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 
 @Module({
   imports: [
@@ -20,6 +23,9 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
     StorageModule,
     MetricsModule,
     HealthModule,
+    UsersModule,
+    AuthModule,
+    WorkspacesModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: GlobalExceptionFilter }],
 })
