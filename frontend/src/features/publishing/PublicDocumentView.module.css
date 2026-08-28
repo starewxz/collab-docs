@@ -1,17 +1,22 @@
 .wrapper {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-5);
 }
 
 .heading {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  margin: var(--space-2) 0 0;
 }
 
 .paragraph {
-  font-size: 15px;
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
   white-space: pre-wrap;
   margin: 0;
 }
@@ -21,30 +26,43 @@
   padding-left: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
 }
 
 .checkboxRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
+  font-size: var(--text-md);
+  color: var(--color-text);
+}
+
+.checkboxRow input {
+  margin-top: 5px;
+  accent-color: var(--color-accent);
 }
 
 .code {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-inset);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   overflow-x: auto;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
 }
 
 .image {
   max-width: 100%;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
 }
 
 .empty {
-  color: var(--color-text-muted);
-  font-size: 14px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-md);
 }

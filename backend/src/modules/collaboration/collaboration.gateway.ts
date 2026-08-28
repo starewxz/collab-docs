@@ -19,10 +19,11 @@ import * as Y from 'yjs';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.interface';
 import { AppConfigService } from '../../config/app-config.service';
+import { DocumentPermissionsService } from '../documents/document-permissions.service';
 import { DocumentsService } from '../documents/documents.service';
 import { UsersService } from '../users/users.service';
 import { WorkspaceMember } from '../workspaces/entities/workspace-member.entity';
-import { WorkspacePermissionsService } from '../workspaces/workspace-permissions.service';
+import { WorkspaceRole } from '../workspaces/workspace-role.enum';
 import { CollaborationPersistenceService } from './collaboration-persistence.service';
 import {
   CollaborationService,
@@ -79,7 +80,7 @@ export class CollaborationGateway implements OnGatewayDisconnect {
     @InjectRepository(WorkspaceMember)
     private readonly members: Repository<WorkspaceMember>,
     private readonly documentsService: DocumentsService,
-    private readonly permissions: WorkspacePermissionsService,
+    private readonly documentPermissions: DocumentPermissionsService,
     private readonly usersService: UsersService,
     private readonly collaboration: CollaborationService,
     private readonly persistence: CollaborationPersistenceService,
@@ -91,11 +92,16 @@ export class CollaborationGateway implements OnGatewayDisconnect {
 
   /** Verifies the access token from the handshake before any document-scoped
    * message is accepted. A document id is never trusted from the client
-   * without the workspace/document checks in `handleJoin`. */
+   * without the workspace/document checks in `handleJoin`. A *missing*
+   * token is no longer an immediate rejection - it's how an anonymous
+   * visitor on an edit-by-link public page connects (see
+   * `handlePublicJoin`). It never gains `data(client).user`, so the
+   * authenticated `join` event still rejects it via the `!user` check
+   * below. An *invalid* token (one that was supplied but doesn't verify)
+   * is still rejected outright, same as before. */
   async handleConnection(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token as string | undefined;
     if (!token) {
-      this.rejectConnection(client, 'missing_token');
       return;
     }
     try {
@@ -183,10 +189,9 @@ export class CollaborationGateway implements OnGatewayDisconnect {
     }
 
     // 3. document existence, scoped to this workspace (IDOR-safe, same as REST)
-    let archivedAt: Date | null;
+    let document: Awaited<ReturnType<DocumentsService['get']>>;
     try {
-      const document = await this.documentsService.get(workspaceId, documentId);
-      archivedAt = document.archivedAt;
+      document = await this.documentsService.get(workspaceId, documentId);
     } catch {
       this.metrics.collabConnectionErrorsTotal.inc({
         reason: 'document_not_found',
@@ -196,10 +201,101 @@ export class CollaborationGateway implements OnGatewayDisconnect {
       return;
     }
 
-    // 4. document read/edit permission - VIEWER (or an archived document, for
-    // everyone) may join and receive updates, but never publish edits.
-    const canEdit =
-      this.permissions.canEditDocument(membership.role) && !archivedAt;
+    // 4. document-level access (workspace role, further narrowed/extended by
+    // DocumentPermissionsService's per-document ACL - see TT gap 1). A
+    // restricted document the user has no explicit access to is treated the
+    // same as "doesn't exist", matching the REST controller's posture.
+    const access = await this.documentPermissions.resolveAccess(
+      document,
+      user.sub,
+      membership.role,
+    );
+    if (!access.canView) {
+      this.metrics.collabConnectionErrorsTotal.inc({
+        reason: 'forbidden_view',
+      });
+      client.emit('join-error', { message: 'Document not found' });
+      client.disconnect(true);
+      return;
+    }
+
+    // Archived documents are read-only for everyone, regardless of ACL.
+    const canEdit = access.canEdit && !document.archivedAt;
+
+    const profile = await this.usersService.findById(user.sub);
+    const displayName = profile
+      ? `${profile.firstName} ${profile.lastName}`.trim()
+      : user.email;
+
+    await this.completeJoin(client, {
+      workspaceId,
+      documentId,
+      canEdit,
+      role: membership.role,
+      selfId: user.sub,
+      selfName: displayName,
+    });
+  }
+
+  /**
+   * Anonymous counterpart to `handleJoin`, for a public edit-by-link
+   * (`Document.publicAccessMode === 'edit'`) - see TT gap 2. No JWT, no
+   * workspace membership: the *only* authorization check is "does a
+   * published, non-expired, edit-mode document exist at this slug", via
+   * the same `findPublishedBySlug` the read-only public REST endpoint
+   * uses (already excludes unpublished/archived/expired documents). The
+   * resulting session is scoped to exactly that one document - there is no
+   * path from here to any other document, workspace metadata, or
+   * membership data, satisfying "public editor can only affect the shared
+   * document" and "edit link must not grant broader workspace access".
+   */
+  @SubscribeMessage('join-public')
+  async handlePublicJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { slug?: string },
+  ): Promise<void> {
+    const slug = body?.slug;
+    if (!slug) {
+      client.emit('join-error', { message: 'slug is required' });
+      return;
+    }
+
+    const document = await this.documentsService.findPublishedBySlug(slug);
+    if (!document || document.publicAccessMode !== 'edit') {
+      this.metrics.collabConnectionErrorsTotal.inc({
+        reason: 'public_link_unavailable',
+      });
+      client.emit('join-error', { message: 'This link is not available' });
+      client.disconnect(true);
+      return;
+    }
+
+    await this.completeJoin(client, {
+      workspaceId: document.workspaceId,
+      documentId: document.id,
+      canEdit: true,
+      role: null,
+      selfId: `anon-${client.id}`,
+      selfName: 'Public visitor',
+    });
+  }
+
+  /** Shared tail of `handleJoin`/`handlePublicJoin`: room join, session
+   * hydration, presence bookkeeping, and the `joined`/`sync-update`/
+   * `awareness-update` acknowledgement. Everything above this point is
+   * exactly where the two flows differ (how the caller is authorized). */
+  private async completeJoin(
+    client: Socket,
+    params: {
+      workspaceId: string;
+      documentId: string;
+      canEdit: boolean;
+      role: WorkspaceRole | null;
+      selfId: string;
+      selfName: string;
+    },
+  ): Promise<void> {
+    const { workspaceId, documentId, canEdit, role, selfId, selfName } = params;
     data(client).session = { workspaceId, documentId, canEdit };
 
     // A client reconnecting inside the grace period reuses the still-live
@@ -218,16 +314,11 @@ export class CollaborationGateway implements OnGatewayDisconnect {
       this.metrics.collabSessionsCurrent.inc();
     }
 
-    const profile = await this.usersService.findById(user.sub);
-    const displayName = profile
-      ? `${profile.firstName} ${profile.lastName}`.trim()
-      : user.email;
-
     client.emit('joined', {
       documentId,
       canEdit,
-      role: membership.role,
-      self: { id: user.sub, name: displayName },
+      role,
+      self: { id: selfId, name: selfName },
     });
     client.emit(
       'sync-update',
@@ -245,7 +336,13 @@ export class CollaborationGateway implements OnGatewayDisconnect {
     }
 
     this.logger.info(
-      { event: 'collab_joined', documentId, workspaceId, canEdit },
+      {
+        event: 'collab_joined',
+        documentId,
+        workspaceId,
+        canEdit,
+        public: role === null,
+      },
       'collab_joined',
     );
   }

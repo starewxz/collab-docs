@@ -3,7 +3,12 @@ import * as Y from 'yjs';
 import { PublicDocumentsService } from './public-documents.service';
 
 function buildService(options: {
-  document?: { id: string; title: string; publishedAt: Date } | null;
+  document?: {
+    id: string;
+    title: string;
+    publishedAt: Date;
+    publicAccessMode?: 'view' | 'edit';
+  } | null;
   hydrateState?: Uint8Array | null;
   hydrateError?: Error;
 }) {
@@ -84,8 +89,23 @@ describe('PublicDocumentsService', () => {
 
     const result = await service.getPublished('hello');
     expect(Object.keys(result).sort()).toEqual(
-      ['blocks', 'publishedAt', 'title'].sort(),
+      ['blocks', 'mode', 'publishedAt', 'title'].sort(),
     );
+  });
+
+  it('includes the public access mode (TT gap 2) so the frontend knows whether to render read-only or editable', async () => {
+    const { service } = buildService({
+      document: {
+        id: 'doc-1',
+        title: 'Hello',
+        publishedAt: new Date(),
+        publicAccessMode: 'edit',
+      },
+      hydrateState: null,
+    });
+
+    const result = await service.getPublished('hello');
+    expect(result.mode).toBe('edit');
   });
 
   it('increments publicRenderFailuresTotal and rethrows on a hydrate error', async () => {

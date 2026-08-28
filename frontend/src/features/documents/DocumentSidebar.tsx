@@ -1,12 +1,25 @@
 "use client";
 
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { ConfirmDialog, IconButton, Tooltip, useToast } from "@/components/ui";
+import { ChevronRightIcon, FileTextIcon, PlusIcon, UndoIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
 import { getWorkspace } from "@/features/workspaces/api";
 import type { WorkspaceRole } from "@/features/workspaces/types";
-import { isApiError, isPlanLimitError } from "@/lib/api-error";
+import { formatPlanLimitMessage, isApiError, isPlanLimitError } from "@/lib/api-error";
 import {
   archiveDocument,
   createDocument,
@@ -15,15 +28,27 @@ import {
   renameDocument,
   restoreDocument,
 } from "./api";
+import { computeOptimisticMove, isSelfOrDescendant, resolveDropZone } from "./dragMove";
+import { ROOT_DROP_ZONE_ID, type DropZone } from "./dragTypes";
 import styles from "./DocumentSidebar.module.css";
 import { canCreateDocument, canEditDocument } from "./permissions";
 import { DocumentTreeItem } from "./DocumentTreeItem";
 import { buildDocumentTree } from "./tree";
-import type { DocumentNode } from "./types";
+import type { DocumentNode, DocumentPlacement } from "./types";
 
-export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
+export function DocumentSidebar({
+  workspaceId,
+  onNavigate,
+}: {
+  workspaceId: string;
+  /** Called after navigating to a document - lets a mobile drawer wrapper
+   * close itself once the user has actually picked something, without
+   * DocumentSidebar needing to know it might be inside a drawer. */
+  onNavigate?: () => void;
+}) {
   const { status } = useRequireAuth();
   const { apiFetch } = useAuth();
+  const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const activeDocumentId = useMemo(() => {
@@ -40,6 +65,13 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
+  const [archiveTarget, setArchiveTarget] = useState<{ id: string; title: string } | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<{ id: string; zone: DropZone } | null>(
+    null,
+  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -77,6 +109,7 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
 
   function select(id: string) {
     router.push(`/workspace/${workspaceId}/document/${id}`);
+    onNavigate?.();
   }
 
   async function handleCreateRoot() {
@@ -85,6 +118,7 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
       const doc = await createDocument(apiFetch, workspaceId, "Untitled");
       reload();
       select(doc.id);
+      showToast("Document created");
     } catch (err) {
       setError(describeCreateError(err));
     }
@@ -97,6 +131,7 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
       setExpanded((prev) => new Set(prev).add(parentId));
       reload();
       select(doc.id);
+      showToast("Document created");
     } catch (err) {
       setError(describeCreateError(err));
     }
@@ -107,7 +142,7 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
    * only makes the rejection actionable. */
   function describeCreateError(err: unknown): string {
     if (isPlanLimitError(err)) {
-      return `${err.message} Upgrade to PRO from the workspace settings page.`;
+      return formatPlanLimitMessage(err, "Upgrade to PRO from the workspace settings page.");
     }
     return isApiError(err) ? err.message : "Failed to create document.";
   }
@@ -125,14 +160,30 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  async function handleArchive(id: string) {
+  /** Archiving a document takes its entire subtree with it - easy to do
+   * by accident from a hover control, so it's confirmed rather than
+   * immediate (still fully reversible via restore, but not obviously so
+   * at a glance). */
+  function requestArchive(id: string) {
+    const doc = (documents ?? []).find((d) => d.id === id);
+    setArchiveTarget({ id, title: doc?.title || "Untitled" });
+  }
+
+  async function confirmArchive() {
+    if (!archiveTarget) return;
+    const id = archiveTarget.id;
     setError(null);
+    setArchiving(true);
     try {
       await archiveDocument(apiFetch, workspaceId, id);
       if (activeDocumentId === id) router.push(`/workspace/${workspaceId}`);
       reload();
+      setArchiveTarget(null);
     } catch (err) {
       setError(isApiError(err) ? err.message : "Failed to archive document.");
+      setArchiveTarget(null);
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -180,26 +231,87 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
     }
   }
 
+  /** Called continuously while dragging (dnd-kit re-fires on every frame
+   * the pointer moves over a droppable) - just tracks which row/zone to
+   * highlight, no data mutation happens here. */
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    // A row is both draggable and droppable, so early in a drag (before
+    // the pointer has left the source row) `over` can briefly be the row
+    // being dragged itself - don't show a drop indicator on top of the
+    // item you're picking up.
+    if (!over || over.id === active.id) {
+      setDragOverTarget(null);
+      return;
+    }
+    if (over.id === ROOT_DROP_ZONE_ID) {
+      setDragOverTarget({ id: ROOT_DROP_ZONE_ID, zone: "inside" });
+      return;
+    }
+    const activeRect = active.rect.current.translated;
+    if (!activeRect) return;
+    const zone = resolveDropZone(
+      activeRect.top,
+      activeRect.height,
+      over.rect.top,
+      over.rect.height,
+    );
+    setDragOverTarget({ id: String(over.id), zone });
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const target = dragOverTarget;
+    setDraggingId(null);
+    setDragOverTarget(null);
+    if (!documents || !target) return;
+
+    const nodeId = String(event.active.id);
+    const resolved = resolveDragEndMove(documents, nodeId, target);
+    if (!resolved) return;
+
+    const previous = documents;
+    setDocuments(
+      computeOptimisticMove(previous, nodeId, resolved.parentId, resolved.referenceId, resolved.placement),
+    );
+    setError(null);
+    try {
+      await moveDocument(
+        apiFetch,
+        workspaceId,
+        nodeId,
+        resolved.parentId,
+        resolved.referenceId,
+        resolved.placement,
+      );
+      reload();
+    } catch (err) {
+      setDocuments(previous);
+      setError(isApiError(err) ? err.message : "Failed to move document.");
+    }
+  }
+
   const canEdit = role !== null && canEditDocument(role);
   const canCreate = role !== null && canCreateDocument(role);
+  const draggingNode = draggingId ? (documents ?? []).find((d) => d.id === draggingId) : null;
 
   return (
     <nav className={styles.sidebar}>
       <div className={styles.header}>
         <span className={styles.headerTitle}>Documents</span>
         {canCreate ? (
-          <button
-            type="button"
-            className={styles.iconButton}
-            title="New document"
-            onClick={handleCreateRoot}
-          >
-            +
-          </button>
+          <Tooltip label="New document">
+            <IconButton size="sm" aria-label="Create root document" onClick={handleCreateRoot}>
+              <PlusIcon />
+            </IconButton>
+          </Tooltip>
         ) : null}
       </div>
 
-      {error ? <p className={styles.error}>{error}</p> : null}
+      {error ? (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
 
       {documents === null ? (
         <p className={styles.hint}>Loading…</p>
@@ -208,60 +320,124 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
           {canCreate ? "No documents yet - create your first one." : "No documents yet."}
         </p>
       ) : (
-        <div className={styles.tree}>
-          {tree.map((node, index) => (
-            <DocumentTreeItem
-              key={node.id}
-              node={node}
-              depth={0}
-              activeDocumentId={activeDocumentId}
-              expanded={expanded}
-              onToggleExpand={toggleExpand}
-              onSelect={select}
-              canEdit={canEdit}
-              renamingId={renamingId}
-              onStartRename={setRenamingId}
-              onSubmitRename={handleSubmitRename}
-              onCancelRename={() => setRenamingId(null)}
-              onAddChild={handleAddChild}
-              onArchive={handleArchive}
-              onMoveUp={handleMoveUp}
-              onMoveDown={handleMoveDown}
-              isFirstSibling={index === 0}
-              isLastSibling={index === tree.length - 1}
-            />
-          ))}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={(event) => setDraggingId(String(event.active.id))}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => {
+            setDraggingId(null);
+            setDragOverTarget(null);
+          }}
+        >
+          <div className={styles.tree}>
+            {tree.map((node, index) => (
+              <DocumentTreeItem
+                key={node.id}
+                node={node}
+                depth={0}
+                activeDocumentId={activeDocumentId}
+                expanded={expanded}
+                onToggleExpand={toggleExpand}
+                onSelect={select}
+                canEdit={canEdit}
+                renamingId={renamingId}
+                onStartRename={setRenamingId}
+                onSubmitRename={handleSubmitRename}
+                onCancelRename={() => setRenamingId(null)}
+                onAddChild={handleAddChild}
+                onArchive={requestArchive}
+                onMoveUp={handleMoveUp}
+                onMoveDown={handleMoveDown}
+                isFirstSibling={index === 0}
+                isLastSibling={index === tree.length - 1}
+                dragOverTarget={dragOverTarget}
+                draggingId={draggingId}
+              />
+            ))}
+          </div>
+          {canEdit && draggingId ? (
+            <RootDropZone isOver={dragOverTarget?.id === ROOT_DROP_ZONE_ID} />
+          ) : null}
+          <DragOverlay dropAnimation={null}>
+            {draggingNode ? (
+              <div className={styles.dragOverlayRow}>
+                <FileTextIcon className={styles.docIcon} width={14} height={14} />
+                <span className={styles.title}>{draggingNode.title}</span>
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       <div className={styles.archivedSection}>
         <button
           type="button"
-          className={styles.iconButton}
+          className={styles.archivedToggle}
           onClick={() => setShowArchived((v) => !v)}
+          aria-expanded={showArchived}
+          aria-controls="archived-documents-list"
         >
-          {showArchived ? "Hide archived" : `Archived (${archived.length})`}
+          <ChevronRightIcon
+            style={{ transform: showArchived ? "rotate(90deg)" : "none", transition: "transform 120ms" }}
+          />
+          {showArchived ? "Archived" : `Archived (${archived.length})`}
         </button>
-        {showArchived
-          ? archived.map((doc) => (
-              <div key={doc.id} className={styles.archivedRow}>
-                <span className={styles.archivedTitle} title={doc.title}>
-                  {doc.title}
-                </span>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    title="Restore"
-                    onClick={() => handleRestore(doc.id)}
-                  >
-                    ↺
-                  </button>
-                ) : null}
-              </div>
-            ))
-          : null}
+        {showArchived ? (
+          <div id="archived-documents-list" className={styles.archivedList}>
+            {archived.length === 0 ? (
+              <p className={styles.hint}>No archived documents.</p>
+            ) : (
+              archived.map((doc) => (
+                <div key={doc.id} className={styles.archivedRow}>
+                  <span className={styles.archivedTitle} title={doc.title}>
+                    {doc.title}
+                  </span>
+                  {canEdit ? (
+                    <Tooltip label="Restore">
+                      <IconButton
+                        size="sm"
+                        aria-label={`Restore "${doc.title}"`}
+                        onClick={() => handleRestore(doc.id)}
+                      >
+                        <UndoIcon />
+                      </IconButton>
+                    </Tooltip>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
       </div>
+
+      {archiveTarget ? (
+        <ConfirmDialog
+          title="Archive document?"
+          message={`"${archiveTarget.title}" and any nested documents will be moved to Archived. You can restore them later from the sidebar.`}
+          confirmLabel="Archive"
+          danger
+          pending={archiving}
+          onConfirm={confirmArchive}
+          onCancel={() => setArchiveTarget(null)}
+        />
+      ) : null}
     </nav>
+  );
+}
+
+/** Always-present drop target for "move this document to the workspace
+ * root" - only rendered while a drag is in progress (see DocumentSidebar),
+ * since it has no other purpose. */
+function RootDropZone({ isOver }: { isOver: boolean }) {
+  const { setNodeRef } = useDroppable({ id: ROOT_DROP_ZONE_ID });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`${styles.rootDropZone} ${isOver ? styles.rootDropZoneActive : ""}`}
+    >
+      Drop here to move to root
+    </div>
   );
 }

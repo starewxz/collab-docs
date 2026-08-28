@@ -41,16 +41,16 @@ function buildService(existingAutoRow: { state: Buffer } | null = null) {
   const metrics = {
     collabPersistTotal: { inc: jest.fn() },
   };
-  const documentsService = { updateSearchContent: jest.fn() };
+  const searchIndexQueue = { add: jest.fn() };
 
   const service = new CollaborationPersistenceService(
     repo as never,
     logger as never,
     metrics as never,
-    documentsService as never,
+    searchIndexQueue as never,
   );
 
-  return { service, repo, rows, metrics, documentsService };
+  return { service, repo, rows, metrics, searchIndexQueue };
 }
 
 describe('CollaborationPersistenceService', () => {
@@ -122,23 +122,24 @@ describe('CollaborationPersistenceService', () => {
       });
     });
 
-    it('extracts plain text from the durably-written state and updates the search index (Stage 8)', async () => {
-      const { service, documentsService } = buildService();
+    it('enqueues an async search-index job after a successful durable write (TT gap 6)', async () => {
+      const { service, searchIndexQueue } = buildService();
       await service.flush('doc-1', validYjsState('hello searchable world'));
 
-      expect(documentsService.updateSearchContent).toHaveBeenCalledWith(
-        'doc-1',
-        'hello searchable world',
+      expect(searchIndexQueue.add).toHaveBeenCalledWith(
+        'index',
+        { documentId: 'doc-1' },
+        expect.objectContaining({ jobId: 'doc-1', attempts: 3 }),
       );
     });
 
-    it('does not update the search index when the durable write itself failed', async () => {
-      const { service, repo, documentsService } = buildService();
+    it('does not enqueue a search-index job when the durable write itself failed', async () => {
+      const { service, repo, searchIndexQueue } = buildService();
       repo.findOne.mockRejectedValueOnce(new Error('db down'));
 
       await service.flush('doc-1', validYjsState('unreached'));
 
-      expect(documentsService.updateSearchContent).not.toHaveBeenCalled();
+      expect(searchIndexQueue.add).not.toHaveBeenCalled();
     });
   });
 

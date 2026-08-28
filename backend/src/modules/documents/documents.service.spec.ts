@@ -130,11 +130,20 @@ function buildService(seed: Document[] = []) {
     documentOperationsTotal: { inc: jest.fn() },
     documentsPublishedTotal: { inc: jest.fn() },
     documentsUnpublishedTotal: { inc: jest.fn() },
+    documentTreeCacheTotal: { inc: jest.fn() },
   };
   const revalidation = { revalidateSlug: jest.fn() };
   const entitlements = {
     lockWorkspace: jest.fn(),
     assertCanCreateDocument: jest.fn(),
+  };
+  // Always-miss stand-in - list()'s caching behavior has its own focused
+  // tests below; the other describe blocks just need get/find to keep
+  // working exactly as before.
+  const redis = {
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn(),
+    del: jest.fn(),
   };
 
   const service = new DocumentsService(
@@ -144,9 +153,10 @@ function buildService(seed: Document[] = []) {
     metrics as never,
     revalidation as never,
     entitlements as never,
+    redis as never,
   );
 
-  return { service, repo, metrics, revalidation, entitlements };
+  return { service, repo, metrics, revalidation, entitlements, redis };
 }
 
 function doc(overrides: Partial<Document>): Document {
@@ -161,6 +171,10 @@ function doc(overrides: Partial<Document>): Document {
     isPublished: false,
     publicSlug: null,
     publishedAt: null,
+    publicAccessMode: 'view',
+    publicExpiresAt: null,
+    restricted: false,
+    contentText: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -247,6 +261,61 @@ describe('DocumentsService', () => {
 
       const result = await service.list('ws-1', true);
       expect(result.map((d) => d.id).sort()).toEqual(['active', 'gone']);
+    });
+  });
+
+  describe('list (Redis cache, TT gap 7)', () => {
+    it('serves a cache hit without querying Postgres', async () => {
+      const { service, repo, redis } = buildService([
+        doc({ id: 'a', position: 1000 }),
+      ]);
+      const cachedDto = {
+        ...doc({ id: 'cached', position: 1000 }),
+        archivedAt: null,
+      };
+      redis.get.mockResolvedValueOnce(JSON.stringify([cachedDto]));
+
+      const result = await service.list('ws-1', true);
+
+      expect(result.map((d) => d.id)).toEqual(['cached']);
+      expect(repo.find).not.toHaveBeenCalled();
+    });
+
+    it('writes the tree to the cache on a miss', async () => {
+      const { service, redis } = buildService([
+        doc({ id: 'a', position: 1000 }),
+      ]);
+
+      await service.list('ws-1', true);
+
+      expect(redis.set).toHaveBeenCalledWith(
+        'doc-tree:ws-1',
+        expect.stringContaining('"a"'),
+        'EX',
+        60,
+      );
+    });
+
+    it('invalidates the cache after a mutation (rename)', async () => {
+      const { service, redis } = buildService([
+        doc({ id: 'a', position: 1000 }),
+      ]);
+
+      await service.update('ws-1', 'a', { title: 'Renamed' });
+
+      expect(redis.del).toHaveBeenCalledWith('doc-tree:ws-1');
+    });
+
+    it('falls back to Postgres if Redis read fails, without throwing', async () => {
+      const { service, repo, redis } = buildService([
+        doc({ id: 'a', position: 1000 }),
+      ]);
+      redis.get.mockRejectedValueOnce(new Error('redis down'));
+
+      const result = await service.list('ws-1', true);
+
+      expect(result.map((d) => d.id)).toEqual(['a']);
+      expect(repo.find).toHaveBeenCalled();
     });
   });
 

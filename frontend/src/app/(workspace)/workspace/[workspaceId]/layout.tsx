@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { DocumentSidebar } from "@/features/documents/DocumentSidebar";
-import styles from "./layout.module.css";
+import { WorkspaceDetailShell } from "@/features/documents/WorkspaceDetailShell";
 
 export default async function WorkspaceDetailLayout({
   children,
@@ -10,10 +9,5 @@ export default async function WorkspaceDetailLayout({
   params: Promise<{ workspaceId: string }>;
 }) {
   const { workspaceId } = await params;
-  return (
-    <div className={styles.layout}>
-      <DocumentSidebar workspaceId={workspaceId} />
-      <div className={styles.content}>{children}</div>
-    </div>
-  );
+  return <WorkspaceDetailShell workspaceId={workspaceId}>{children}</WorkspaceDetailShell>;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Spinner } from "@/components/ui";
+import { Badge, Button, Card, Spinner, useToast } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { canManageBilling } from "@/features/workspaces/permissions";
 import type { WorkspaceRole } from "@/features/workspaces/types";
@@ -30,6 +30,7 @@ function UsageRow({
     usage.limit === null
       ? 0
       : Math.min(100, Math.round((usage.used / Math.max(usage.limit, 1)) * 100));
+  const nearLimit = usage.limit !== null && pct >= 90;
   return (
     <div className={styles.usageRow}>
       <div className={styles.usageLabel}>
@@ -40,7 +41,10 @@ function UsageRow({
       </div>
       {usage.limit !== null ? (
         <div className={styles.usageBar}>
-          <div className={styles.usageBarFill} style={{ width: `${pct}%` }} />
+          <div
+            className={`${styles.usageBarFill} ${nearLimit ? styles.usageBarFillWarning : ""}`}
+            style={{ width: `${pct}%` }}
+          />
         </div>
       ) : null}
     </div>
@@ -55,6 +59,7 @@ export function BillingSection({
   role: WorkspaceRole;
 }) {
   const { apiFetch } = useAuth();
+  const { showToast } = useToast();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -83,6 +88,7 @@ export function BillingSection({
     try {
       const sub = await mockPay(apiFetch, workspaceId);
       setSubscription(sub);
+      showToast("Upgraded to PRO");
     } catch (err) {
       setActionError(isApiError(err) ? err.message : "Failed to upgrade.");
     } finally {
@@ -96,6 +102,7 @@ export function BillingSection({
     try {
       const sub = await downgradeToFree(apiFetch, workspaceId);
       setSubscription(sub);
+      showToast("Downgraded to FREE");
     } catch (err) {
       setActionError(isApiError(err) ? err.message : "Failed to downgrade.");
     } finally {
@@ -105,30 +112,22 @@ export function BillingSection({
 
   if (error) {
     return (
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Billing &amp; plan</h2>
-        <p className={styles.error}>{error}</p>
-      </section>
+      <p className={styles.error} role="alert">
+        {error}
+      </p>
     );
   }
 
   if (!subscription) {
-    return (
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Billing &amp; plan</h2>
-        <Spinner label="Loading billing" />
-      </section>
-    );
+    return <Spinner label="Loading billing" />;
   }
 
   const canManage = canManageBilling(role);
 
   return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>Billing &amp; plan</h2>
-
+    <Card className={styles.card}>
       <div className={styles.planRow}>
-        <span className={styles.planBadge}>{subscription.plan.toUpperCase()}</span>
+        <Badge variant="accent">{subscription.plan.toUpperCase()}</Badge>
         <span className={styles.statusText}>{subscription.status}</span>
         {subscription.currentPeriodEnd ? (
           <span className={styles.periodText}>
@@ -147,21 +146,25 @@ export function BillingSection({
         />
       </div>
 
-      {actionError ? <p className={styles.error}>{actionError}</p> : null}
+      {actionError ? (
+        <p className={styles.error} role="alert">
+          {actionError}
+        </p>
+      ) : null}
 
       {canManage ? (
         <div className={styles.actions}>
           {subscription.plan === "free" ? (
-            <Button onClick={handleUpgrade} disabled={pending}>
+            <Button size="sm" onClick={handleUpgrade} disabled={pending}>
               {pending ? "Upgrading…" : "Upgrade to PRO"}
             </Button>
           ) : (
-            <Button variant="secondary" onClick={handleDowngrade} disabled={pending}>
+            <Button size="sm" variant="secondary" onClick={handleDowngrade} disabled={pending}>
               {pending ? "Downgrading…" : "Downgrade to FREE"}
             </Button>
           )}
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

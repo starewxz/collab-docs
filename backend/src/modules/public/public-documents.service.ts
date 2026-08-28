@@ -51,6 +51,7 @@ export class PublicDocumentsService {
     dto.title = document.title;
     dto.blocks = blocks;
     dto.publishedAt = document.publishedAt!;
+    dto.mode = document.publicAccessMode;
     return dto;
   }
 }

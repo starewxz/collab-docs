@@ -4,10 +4,25 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { IsNull, Repository } from 'typeorm';
+import { Document } from '../documents/entities/document.entity';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { QueueName } from '../../queue/queue.constants';
 import { Notification } from './entities/notification.entity';
 import type { NotificationJobPayload } from './notification-job.types';
+import type { NotificationType } from './notification-type.enum';
+
+/** `list()`'s shape - `workspaceId` is derived via a join against
+ * `documents`, never stored on `Notification` itself (Stage 9). */
+export interface NotificationWithWorkspace {
+  id: string;
+  type: NotificationType;
+  workspaceId: string;
+  documentId: string;
+  commentId: string | null;
+  actorId: string | null;
+  readAt: Date | null;
+  createdAt: Date;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -53,7 +68,12 @@ export class NotificationsService {
       .orIgnore()
       .execute();
 
-    const inserted = (result.identifiers?.length ?? 0) > 0;
+    // Real TypeORM/Postgres ON CONFLICT DO NOTHING still returns one
+    // `identifiers` entry per input row, but `null` for a skipped
+    // (duplicate) row - checking `.length` alone would treat every
+    // redelivered/retried job as newly created. See ADR-020's identical
+    // finding in BillingService.applyEvent (Stage 8).
+    const inserted = result.identifiers.some((id) => id != null);
     this.metrics.notificationsProcessedTotal.inc({
       result: inserted ? 'created' : 'duplicate',
     });
@@ -69,12 +89,33 @@ export class NotificationsService {
     );
   }
 
-  async list(userId: string, unreadOnly: boolean): Promise<Notification[]> {
-    return this.notifications.find({
-      where: unreadOnly ? { userId, readAt: IsNull() } : { userId },
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
+  /** Explicit per-field `.select()`/`.addSelect()` + `.getRawMany()`
+   * throughout, deliberately avoiding `getRawAndEntities()` - mixing that
+   * with a manually-computed join column (`workspaceId`) is exactly the
+   * TypeORM pitfall ADR-019 already found once in DocumentsService.search()
+   * (silently wrong/missing fields from internal auto-aliasing collisions). */
+  async list(
+    userId: string,
+    unreadOnly: boolean,
+  ): Promise<NotificationWithWorkspace[]> {
+    const qb = this.notifications
+      .createQueryBuilder('n')
+      .innerJoin(Document, 'd', 'd.id = n."documentId"')
+      .select('n.id', 'id')
+      .addSelect('n.type', 'type')
+      .addSelect('d."workspaceId"', 'workspaceId')
+      .addSelect('n."documentId"', 'documentId')
+      .addSelect('n."commentId"', 'commentId')
+      .addSelect('n."actorId"', 'actorId')
+      .addSelect('n."readAt"', 'readAt')
+      .addSelect('n."createdAt"', 'createdAt')
+      .where('n."userId" = :userId', { userId })
+      .orderBy('n."createdAt"', 'DESC')
+      .limit(100);
+    if (unreadOnly) {
+      qb.andWhere('n."readAt" IS NULL');
+    }
+    return qb.getRawMany<NotificationWithWorkspace>();
   }
 
   async unreadCount(userId: string): Promise<number> {

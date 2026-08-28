@@ -60,6 +60,35 @@ export class Document {
   publishedAt: Date | null;
 
   /**
+   * Public sharing mode (only meaningful while `isPublished`): 'view'
+   * (read-only public page, the original Stage 7 behavior) or 'edit'
+   * (anonymous visitors can collaboratively edit via the `/collab` gateway's
+   * `join-public` event, scoped to exactly this document - see
+   * CollaborationGateway.handlePublicJoin). Defaults to 'view' so every
+   * pre-existing published document keeps its original read-only behavior.
+   */
+  @Column({ type: 'varchar', length: 10, default: 'view' })
+  publicAccessMode: 'view' | 'edit';
+
+  /** Optional public-link expiry. When set and in the past, the link is
+   * treated exactly like an unpublished/nonexistent one (404) - see
+   * `DocumentsService.findPublishedBySlug`. Null = never expires. */
+  @Column({ type: 'timestamptz', nullable: true })
+  publicExpiresAt: Date | null;
+
+  /**
+   * Document-level access control (see `document_collaborators` /
+   * `DocumentPermissionsService`). When true, only OWNER/ADMIN workspace
+   * roles and users with an explicit `DocumentCollaborator` row may view or
+   * edit this document - the base workspace role alone is not enough, even
+   * for a member who could normally edit any document. Defaults to false
+   * so every pre-existing document keeps today's "any workspace member can
+   * see it" behavior.
+   */
+  @Column({ type: 'boolean', default: false })
+  restricted: boolean;
+
+  /**
    * Stage 8 search: plain-text extraction of the document's current
    * durable Yjs state (block text joined with spaces, truncated - see
    * DocumentsService.updateSearchContent), kept in sync by

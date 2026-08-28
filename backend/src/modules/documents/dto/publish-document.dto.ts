@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, Length, Matches } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 
 export class PublishDocumentDto {
   @ApiProperty({
@@ -14,4 +21,24 @@ export class PublishDocumentDto {
     message: 'slug may only contain letters, numbers, spaces, - and _',
   })
   slug?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: ['view', 'edit'],
+    default: 'view',
+    description:
+      "'view' is a read-only public page (default); 'edit' additionally lets anonymous visitors collaboratively edit this one document via the public link.",
+  })
+  @IsOptional()
+  @IsIn(['view', 'edit'])
+  mode?: 'view' | 'edit';
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Optional ISO timestamp after which the public link stops resolving (treated the same as unpublished). Omit for a link that never expires.',
+  })
+  @IsOptional()
+  @IsDateString()
+  expiresAt?: string;
 }

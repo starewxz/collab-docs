@@ -697,4 +697,248 @@ describe('Documents (e2e)', () => {
       expect(list.body as DocumentBody[]).toHaveLength(2);
     });
   });
+
+  describe('Document-tree Redis cache invalidation (TT gap 7)', () => {
+    it('a rename is immediately visible in the list, never a stale cached title', async () => {
+      const ownerAgent = request.agent(app.getHttpServer());
+      const owner = await register(
+        ownerAgent,
+        emailFor('cache-owner'),
+        'Owner',
+      );
+      const ownerToken = owner.accessToken;
+      const workspaceId = await createWorkspace(
+        ownerAgent,
+        ownerToken,
+        'Cache WS',
+      );
+
+      const created = await ownerAgent
+        .post(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Original title' })
+        .expect(201);
+      const documentId = (created.body as DocumentBody).id;
+
+      // Populate the cache with the original title.
+      const before = await ownerAgent
+        .get(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect((before.body as { title: string }[])[0].title).toBe(
+        'Original title',
+      );
+
+      await ownerAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Renamed title' })
+        .expect(200);
+
+      const after = await ownerAgent
+        .get(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect((after.body as { title: string }[])[0].title).toBe(
+        'Renamed title',
+      );
+    });
+
+    it('archiving is immediately reflected in the default (non-archived) list', async () => {
+      const ownerAgent = request.agent(app.getHttpServer());
+      const owner = await register(
+        ownerAgent,
+        emailFor('cache-archive-owner'),
+        'Owner',
+      );
+      const ownerToken = owner.accessToken;
+      const workspaceId = await createWorkspace(
+        ownerAgent,
+        ownerToken,
+        'Cache Archive WS',
+      );
+
+      const created = await ownerAgent
+        .post(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'To archive' })
+        .expect(201);
+      const documentId = (created.body as DocumentBody).id;
+
+      const before = await ownerAgent
+        .get(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect((before.body as DocumentBody[]).map((d) => d.id)).toContain(
+        documentId,
+      );
+
+      await ownerAgent
+        .delete(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(204);
+
+      const after = await ownerAgent
+        .get(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect((after.body as DocumentBody[]).map((d) => d.id)).not.toContain(
+        documentId,
+      );
+    });
+  });
+
+  describe('Document-level ACL (TT gap 1)', () => {
+    let ownerAgent: ReturnType<typeof request.agent>;
+    let ownerToken: string;
+    let workspaceId: string;
+    let documentId: string;
+
+    let editorAgent: ReturnType<typeof request.agent>;
+    let editorToken: string;
+    let editorUserId: string;
+
+    let viewerAgent: ReturnType<typeof request.agent>;
+    let viewerToken: string;
+    let viewerUserId: string;
+
+    let outsiderAgent: ReturnType<typeof request.agent>;
+    let outsiderToken: string;
+
+    beforeAll(async () => {
+      ownerAgent = request.agent(app.getHttpServer());
+      const owner = await register(ownerAgent, emailFor('acl-owner'), 'Owner');
+      ownerToken = owner.accessToken;
+      workspaceId = await createWorkspace(ownerAgent, ownerToken, 'ACL WS');
+
+      editorAgent = request.agent(app.getHttpServer());
+      const editorEmail = emailFor('acl-editor');
+      const editor = await register(editorAgent, editorEmail, 'Editor');
+      editorToken = editor.accessToken;
+      editorUserId = editor.user.id;
+      await inviteAndAccept(
+        ownerAgent,
+        ownerToken,
+        workspaceId,
+        editorAgent,
+        editorToken,
+        editorEmail,
+        'EDITOR',
+      );
+
+      viewerAgent = request.agent(app.getHttpServer());
+      const viewerEmail = emailFor('acl-viewer');
+      const viewer = await register(viewerAgent, viewerEmail, 'Viewer');
+      viewerToken = viewer.accessToken;
+      viewerUserId = viewer.user.id;
+      await inviteAndAccept(
+        ownerAgent,
+        ownerToken,
+        workspaceId,
+        viewerAgent,
+        viewerToken,
+        viewerEmail,
+        'VIEWER',
+      );
+
+      // A registered user with no membership in this workspace at all.
+      outsiderAgent = request.agent(app.getHttpServer());
+      const outsider = await register(
+        outsiderAgent,
+        emailFor('acl-outsider'),
+        'Outsider',
+      );
+      outsiderToken = outsider.accessToken;
+
+      const doc = await ownerAgent
+        .post(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Restricted doc' })
+        .expect(201);
+      documentId = (doc.body as DocumentBody).id;
+
+      await ownerAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}/access`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ restricted: true })
+        .expect(200);
+    });
+
+    it('a user without workspace membership cannot fetch the document by direct ID', async () => {
+      await outsiderAgent
+        .get(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${outsiderToken}`)
+        .expect(404);
+    });
+
+    it('a workspace EDITOR with no explicit share is denied on the restricted document', async () => {
+      await editorAgent
+        .get(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${editorToken}`)
+        .expect(403);
+
+      await editorAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${editorToken}`)
+        .send({ title: 'Should not work' })
+        .expect(403);
+    });
+
+    it('the restricted document is hidden from the EDITOR in the workspace list', async () => {
+      const res = await editorAgent
+        .get(`/api/workspaces/${workspaceId}/documents`)
+        .set('Authorization', `Bearer ${editorToken}`)
+        .expect(200);
+      const ids = (res.body as DocumentBody[]).map((d) => d.id);
+      expect(ids).not.toContain(documentId);
+    });
+
+    it('an explicitly-shared VIEWER can read the restricted document', async () => {
+      await ownerAgent
+        .post(
+          `/api/workspaces/${workspaceId}/documents/${documentId}/collaborators`,
+        )
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ userId: viewerUserId, accessLevel: 'VIEWER' })
+        .expect(201);
+
+      const res = await viewerAgent
+        .get(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${viewerToken}`)
+        .expect(200);
+      expect((res.body as DocumentBody).id).toBe(documentId);
+
+      // A VIEWER-level share never grants edit, regardless of workspace role.
+      await viewerAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${viewerToken}`)
+        .send({ title: 'Still read-only' })
+        .expect(403);
+    });
+
+    it('an EDITOR-level share overrides the restriction and allows editing', async () => {
+      await ownerAgent
+        .post(
+          `/api/workspaces/${workspaceId}/documents/${documentId}/collaborators`,
+        )
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ userId: editorUserId, accessLevel: 'EDITOR' })
+        .expect(201);
+
+      const res = await editorAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}`)
+        .set('Authorization', `Bearer ${editorToken}`)
+        .send({ title: 'Now editable' })
+        .expect(200);
+      expect((res.body as { title: string }).title).toBe('Now editable');
+    });
+
+    it('a non-OWNER/ADMIN cannot manage document access', async () => {
+      await editorAgent
+        .patch(`/api/workspaces/${workspaceId}/documents/${documentId}/access`)
+        .set('Authorization', `Bearer ${editorToken}`)
+        .send({ restricted: false })
+        .expect(403);
+    });
+  });
 });

@@ -42,14 +42,13 @@ function isValidCorrelationId(value: unknown): value is string {
               statusCode: res.statusCode,
             }),
           },
-          level: config.app.nodeEnv === 'production' ? 'info' : 'debug',
-          transport:
-            config.app.nodeEnv === 'production'
-              ? undefined
-              : {
-                  target: 'pino-pretty',
-                  options: { singleLine: true, translateTime: 'HH:MM:ss' },
-                },
+          level: config.isProductionLike ? 'info' : 'debug',
+          transport: config.isProductionLike
+            ? undefined
+            : {
+                target: 'pino-pretty',
+                options: { singleLine: true, translateTime: 'HH:MM:ss' },
+              },
         },
       }),
     }),

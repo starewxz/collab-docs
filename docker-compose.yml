@@ -71,6 +71,28 @@ services:
       # Docker network - .env's FRONTEND_URL is the browser-facing address
       # (localhost:3001) and isn't reachable from inside this container.
       FRONTEND_INTERNAL_URL: http://frontend:3000
+    command:
+      - sh
+      - -c
+      - |
+        # `docker compose restart` (unlike `up`) does not honor depends_on's
+        # health-gating, so postgres/redis/minio may still be restarting
+        # when this container's process starts. The migration CLI has no
+        # connection retry of its own, so retry the whole step here instead
+        # of letting a transient ECONNREFUSED kill the container (which
+        # would otherwise surface as a real backend outage until Docker's
+        # restart policy cycles it again).
+        attempt=1
+        until node ./node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js; do
+          if [ "$$attempt" -ge 20 ]; then
+            echo "migration:run failed after $$attempt attempts, giving up"
+            exit 1
+          fi
+          echo "migration:run failed (attempt $$attempt), retrying in 3s..."
+          attempt=$$((attempt + 1))
+          sleep 3
+        done
+        exec node dist/main.js
     ports:
       - "${BACKEND_HOST_PORT:-4000}:4000"
     depends_on:

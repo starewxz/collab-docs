@@ -40,4 +40,16 @@ export class AppConfigService {
   get billing(): BillingConfig {
     return this.configService.get<BillingConfig>('billing')!;
   }
+
+  /** Security-sensitive behavior (secure cookies, hidden error detail, no
+   * dev-token exposure in invitation responses) should treat `staging` the
+   * same as `production` - it's a real, often-externally-reachable
+   * deployment, not a developer's own machine. `staging` and `production`
+   * still differ in everything else (database, domain, secrets, data) -
+   * this only governs the small set of environment checks that exist
+   * purely to make local development/testing more convenient and would be
+   * a real leak anywhere else. */
+  get isProductionLike(): boolean {
+    return this.app.nodeEnv === 'production' || this.app.nodeEnv === 'staging';
+  }
 }

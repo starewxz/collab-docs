@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
-import { Button, Spinner } from "@/components/ui";
+import { Avatar, Badge, Button, EmptyState, SlideOverPanel, Spinner, useToast } from "@/components/ui";
+import { CloseIcon, MessageIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { canModerateComments } from "@/features/workspaces/permissions";
 import { listMembers } from "@/features/workspaces/api";
@@ -116,6 +117,7 @@ function MentionComposer({
                 className={styles.mentionOption}
                 onClick={() => handlePick(member)}
               >
+                <Avatar name={memberLabel(member)} size="xs" />
                 {memberLabel(member)}
               </button>
             ))}
@@ -133,7 +135,7 @@ function MentionComposer({
                 onClick={() => handleRemoveMention(member.userId)}
                 aria-label={`Remove mention of ${memberLabel(member)}`}
               >
-                ✕
+                <CloseIcon width={10} height={10} />
               </button>
             </span>
           ))}
@@ -192,12 +194,16 @@ function CommentRow({
           placeholder="Edit your comment"
           disabled={editSubmitting}
         />
-        {editError ? <p className={styles.error}>{editError}</p> : null}
+        {editError ? (
+          <p className={styles.error} role="alert">
+            {editError}
+          </p>
+        ) : null}
         <div className={styles.rowActions}>
-          <Button onClick={() => onSubmitEdit(comment)} disabled={editSubmitting}>
+          <Button size="sm" onClick={() => onSubmitEdit(comment)} disabled={editSubmitting}>
             {editSubmitting ? "Saving…" : "Save"}
           </Button>
-          <Button variant="ghost" onClick={onCancelEdit} disabled={editSubmitting}>
+          <Button size="sm" variant="ghost" onClick={onCancelEdit} disabled={editSubmitting}>
             Cancel
           </Button>
         </div>
@@ -207,26 +213,33 @@ function CommentRow({
 
   return (
     <div className={styles.commentBody}>
-      <div className={styles.commentMeta}>
-        <span className={styles.authorName}>{comment.authorName ?? "Unknown"}</span>
-        <span className={styles.timestamp}>
-          {formatTimestamp(comment.createdAt)}
-          {comment.editedAt ? " (edited)" : ""}
-        </span>
-      </div>
-      <p className={styles.commentText}>{comment.content}</p>
-      {(isOwn || canModerate) && canComment ? (
-        <div className={styles.rowActions}>
-          {isOwn ? (
-            <button type="button" className={styles.linkButton} onClick={() => onStartEdit(comment)}>
-              Edit
-            </button>
-          ) : null}
-          <button type="button" className={styles.linkButton} onClick={() => onDelete(comment)}>
-            Delete
-          </button>
+      <Avatar name={comment.authorName ?? "Unknown"} size="sm" />
+      <div className={styles.commentMain}>
+        <div className={styles.commentMeta}>
+          <span className={styles.authorName}>{comment.authorName ?? "Unknown"}</span>
+          <span className={styles.timestamp}>
+            {formatTimestamp(comment.createdAt)}
+            {comment.editedAt ? " · edited" : ""}
+          </span>
         </div>
-      ) : null}
+        <p className={styles.commentText}>{comment.content}</p>
+        {(isOwn || canModerate) && canComment ? (
+          <div className={styles.rowActions}>
+            {isOwn ? (
+              <button type="button" className={styles.linkButton} onClick={() => onStartEdit(comment)}>
+                Edit
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={`${styles.linkButton} ${styles.linkButtonDanger}`}
+              onClick={() => onDelete(comment)}
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -245,6 +258,7 @@ export function CommentsPanel({
   onClose: () => void;
 }) {
   const { apiFetch, user } = useAuth();
+  const { showToast } = useToast();
   const canModerate = canModerateComments((role ?? "VIEWER") as WorkspaceRole);
 
   const [threads, setThreads] = useState<CommentThread[] | null>(null);
@@ -308,6 +322,7 @@ export function CommentsPanel({
       setRootContent("");
       setRootMentions([]);
       reload();
+      showToast("Comment added");
     } catch (err) {
       setRootError(isApiError(err) ? err.message : "Failed to post comment.");
     } finally {
@@ -341,6 +356,7 @@ export function CommentsPanel({
       });
       cancelReply();
       reload();
+      showToast("Reply added");
     } catch (err) {
       setReplyError(isApiError(err) ? err.message : "Failed to post reply.");
     } finally {
@@ -411,17 +427,9 @@ export function CommentsPanel({
   }
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <span className={styles.title}>Comments</span>
-          <button type="button" className={styles.closeButton} onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
+    <SlideOverPanel title="Comments" onClose={onClose} width={400}>
         {canComment ? (
-          <div>
+          <div className={styles.rootComposer}>
             <MentionComposer
               value={rootContent}
               onChange={setRootContent}
@@ -431,8 +439,17 @@ export function CommentsPanel({
               placeholder="Add a comment… use @ to mention someone"
               disabled={rootSubmitting}
             />
-            {rootError ? <p className={styles.error}>{rootError}</p> : null}
-            <Button onClick={handleCreateRoot} disabled={rootSubmitting || !rootContent.trim()}>
+            {rootError ? (
+              <p className={styles.error} role="alert">
+                {rootError}
+              </p>
+            ) : null}
+            <Button
+              size="sm"
+              className={styles.composerSubmit}
+              onClick={handleCreateRoot}
+              disabled={rootSubmitting || !rootContent.trim()}
+            >
               {rootSubmitting ? "Posting…" : "Comment"}
             </Button>
           </div>
@@ -440,23 +457,34 @@ export function CommentsPanel({
           <p className={styles.hint}>You have read-only access to comments.</p>
         )}
 
-        {actionError ? <p className={styles.error}>{actionError}</p> : null}
+        {actionError ? (
+          <p className={styles.error} role="alert">
+            {actionError}
+          </p>
+        ) : null}
 
         {threads === null ? (
           <Spinner label="Loading comments" />
         ) : loadError ? (
-          <p className={styles.error}>{loadError}</p>
+          <p className={styles.error} role="alert">
+            {loadError}
+          </p>
         ) : threads.length === 0 ? (
-          <p className={styles.hint}>No comments yet.</p>
+          <EmptyState
+            icon={<MessageIcon width={20} height={20} />}
+            title="No comments yet"
+            description={canComment ? "Start the conversation above." : "Nothing has been discussed here yet."}
+            compact
+          />
         ) : (
           <div className={styles.list}>
             {threads.map((thread) => (
-              <div key={thread.id} className={styles.thread}>
-                <div className={styles.threadHeader}>
-                  {thread.resolvedAt ? (
-                    <span className={styles.badge}>Resolved</span>
-                  ) : null}
-                </div>
+              <div key={thread.id} className={`${styles.thread} ${thread.resolvedAt ? styles.threadResolved : ""}`}>
+                {thread.resolvedAt ? (
+                  <div className={styles.threadHeader}>
+                    <Badge variant="accent">Resolved</Badge>
+                  </div>
+                ) : null}
                 <CommentRow
                   comment={thread}
                   currentUserId={user?.id}
@@ -542,12 +570,16 @@ export function CommentsPanel({
                       placeholder="Write a reply…"
                       disabled={replySubmitting}
                     />
-                    {replyError ? <p className={styles.error}>{replyError}</p> : null}
+                    {replyError ? (
+                      <p className={styles.error} role="alert">
+                        {replyError}
+                      </p>
+                    ) : null}
                     <div className={styles.rowActions}>
-                      <Button onClick={() => submitReply(thread.id)} disabled={replySubmitting}>
+                      <Button size="sm" onClick={() => submitReply(thread.id)} disabled={replySubmitting}>
                         {replySubmitting ? "Posting…" : "Reply"}
                       </Button>
-                      <Button variant="ghost" onClick={cancelReply} disabled={replySubmitting}>
+                      <Button size="sm" variant="ghost" onClick={cancelReply} disabled={replySubmitting}>
                         Cancel
                       </Button>
                     </div>
@@ -557,7 +589,6 @@ export function CommentsPanel({
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </SlideOverPanel>
   );
 }

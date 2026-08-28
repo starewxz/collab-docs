@@ -2,7 +2,7 @@ import { NotificationType } from './notification-type.enum';
 import { NotificationsService } from './notifications.service';
 
 interface FakeInsertResult {
-  identifiers: { id: string }[];
+  identifiers: ({ id: string } | null)[];
   raw: unknown[];
   generatedMaps: unknown[];
 }
@@ -28,7 +28,15 @@ function buildQueryBuilder(rows: Record<string, unknown>[]): FakeQueryBuilder {
     execute: jest.fn((): Promise<FakeInsertResult> => {
       const exists = rows.some((r) => r.dedupeKey === pendingValues?.dedupeKey);
       if (exists) {
-        return Promise.resolve({ identifiers: [], raw: [], generatedMaps: [] });
+        // Real TypeORM/Postgres ON CONFLICT DO NOTHING still returns one
+        // `identifiers` entry per input row, just `null` - an empty array
+        // here would mask the exact bug this fixture caught (see
+        // NotificationsService.createIfNotExists).
+        return Promise.resolve({
+          identifiers: [null],
+          raw: [],
+          generatedMaps: [],
+        });
       }
       const row = { id: `n-${rows.length + 1}`, ...pendingValues };
       rows.push(row);
@@ -42,9 +50,71 @@ function buildQueryBuilder(rows: Record<string, unknown>[]): FakeQueryBuilder {
   return qb;
 }
 
+interface FakeSelectQueryBuilder {
+  innerJoin(): FakeSelectQueryBuilder;
+  select(): FakeSelectQueryBuilder;
+  addSelect(): FakeSelectQueryBuilder;
+  where(cond: string, params?: Record<string, unknown>): FakeSelectQueryBuilder;
+  andWhere(cond: string): FakeSelectQueryBuilder;
+  orderBy(): FakeSelectQueryBuilder;
+  limit(): FakeSelectQueryBuilder;
+  getRawMany<T>(): Promise<T[]>;
+}
+
+/** Mirrors the real list() query's shape (join + explicit field select,
+ * never getRawAndEntities() - see ADR-019) closely enough to exercise
+ * user-scoping/unreadOnly filtering and the workspaceId join without a
+ * real database. */
+function buildSelectQueryBuilder(
+  rows: Record<string, unknown>[],
+  documentWorkspaces: Record<string, string>,
+): FakeSelectQueryBuilder {
+  let userId: string | undefined;
+  let unreadOnly = false;
+  const qb: FakeSelectQueryBuilder = {
+    innerJoin: () => qb,
+    select: () => qb,
+    addSelect: () => qb,
+    where: (_cond, params) => {
+      userId = params?.userId as string | undefined;
+      return qb;
+    },
+    andWhere: () => {
+      unreadOnly = true;
+      return qb;
+    },
+    orderBy: () => qb,
+    limit: () => qb,
+    getRawMany: <T>() =>
+      Promise.resolve(
+        rows
+          .filter((r) => r.userId === userId)
+          .filter((r) => !unreadOnly || r.readAt == null)
+          .sort(
+            (a, b) =>
+              (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime(),
+          )
+          .slice(0, 100)
+          .map((r) => ({
+            id: r.id,
+            type: r.type,
+            workspaceId: documentWorkspaces[r.documentId as string] ?? 'ws-1',
+            documentId: r.documentId,
+            commentId: r.commentId ?? null,
+            actorId: r.actorId ?? null,
+            readAt: r.readAt ?? null,
+            createdAt: r.createdAt,
+          })) as T[],
+      ),
+  };
+  return qb;
+}
+
 function buildService() {
   const rows: Record<string, unknown>[] = [];
+  const documentWorkspaces: Record<string, string> = { 'doc-1': 'ws-1' };
   const qb = buildQueryBuilder(rows);
+  const selectQb = buildSelectQueryBuilder(rows, documentWorkspaces);
 
   const findByWhere = (
     where: Record<string, unknown>,
@@ -65,7 +135,10 @@ function buildService() {
   };
 
   const repo = {
-    createQueryBuilder: jest.fn((): FakeQueryBuilder => qb),
+    createQueryBuilder: jest.fn(
+      (alias?: string): FakeQueryBuilder | FakeSelectQueryBuilder =>
+        alias ? selectQb : qb,
+    ),
     find: jest.fn(
       ({
         where,
@@ -186,10 +259,17 @@ describe('NotificationsService', () => {
     it('returns only unread notifications when unreadOnly is true', async () => {
       const { service, rows } = buildService();
       rows.push(
-        { id: 'n1', userId: 'user-1', readAt: null, createdAt: new Date() },
+        {
+          id: 'n1',
+          userId: 'user-1',
+          documentId: 'doc-1',
+          readAt: null,
+          createdAt: new Date(),
+        },
         {
           id: 'n2',
           userId: 'user-1',
+          documentId: 'doc-1',
           readAt: new Date(),
           createdAt: new Date(),
         },
@@ -202,10 +282,17 @@ describe('NotificationsService', () => {
     it('returns all notifications for the user when unreadOnly is false', async () => {
       const { service, rows } = buildService();
       rows.push(
-        { id: 'n1', userId: 'user-1', readAt: null, createdAt: new Date() },
+        {
+          id: 'n1',
+          userId: 'user-1',
+          documentId: 'doc-1',
+          readAt: null,
+          createdAt: new Date(),
+        },
         {
           id: 'n2',
           userId: 'user-1',
+          documentId: 'doc-1',
           readAt: new Date(),
           createdAt: new Date(),
         },
@@ -220,12 +307,27 @@ describe('NotificationsService', () => {
       rows.push({
         id: 'n1',
         userId: 'other-user',
+        documentId: 'doc-1',
         readAt: null,
         createdAt: new Date(),
       });
 
       const result = await service.list('user-1', false);
       expect(result).toHaveLength(0);
+    });
+
+    it("includes the workspaceId derived from the notification's document (Stage 9)", async () => {
+      const { service, rows } = buildService();
+      rows.push({
+        id: 'n1',
+        userId: 'user-1',
+        documentId: 'doc-1',
+        readAt: null,
+        createdAt: new Date(),
+      });
+
+      const result = await service.list('user-1', false);
+      expect(result[0].workspaceId).toBe('ws-1');
     });
   });
 

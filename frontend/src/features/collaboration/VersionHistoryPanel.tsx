@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Spinner } from "@/components/ui";
+import { Badge, Button, EmptyState, SlideOverPanel, Spinner, useToast } from "@/components/ui";
+import { HistoryIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { isApiError } from "@/lib/api-error";
 import styles from "./VersionHistoryPanel.module.css";
@@ -32,6 +33,7 @@ export function VersionHistoryPanel({
   onRestored?: () => void;
 }) {
   const { apiFetch } = useAuth();
+  const { showToast } = useToast();
 
   const [versions, setVersions] = useState<VersionSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -102,6 +104,7 @@ export function VersionHistoryPanel({
       await restoreVersion(apiFetch, workspaceId, documentId, selected.id);
       onRestored?.();
       reload();
+      showToast("Version restored");
     } catch (err) {
       setRestoreError(isApiError(err) ? err.message : "Failed to restore this version.");
     } finally {
@@ -110,32 +113,33 @@ export function VersionHistoryPanel({
   }
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <span className={styles.title}>Version History</span>
-          <button type="button" className={styles.closeButton} onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
+    <SlideOverPanel title="Version history" onClose={onClose}>
         {canEdit ? (
-          <div>
-            <Button variant="secondary" onClick={handleCreateVersion} disabled={creating}>
+          <div className={styles.createRow}>
+            <Button variant="secondary" size="sm" onClick={handleCreateVersion} disabled={creating}>
               {creating ? "Saving…" : "Save current as version"}
             </Button>
-            {createError ? <p className={styles.error}>{createError}</p> : null}
+            {createError ? (
+              <p className={styles.error} role="alert">
+                {createError}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
         {versions === null ? (
           <Spinner label="Loading history" />
         ) : loadError ? (
-          <p className={styles.error}>{loadError}</p>
-        ) : versions.length === 0 ? (
-          <p className={styles.hint}>
-            No saved versions yet.{canEdit ? " Save one above to start tracking history." : ""}
+          <p className={styles.error} role="alert">
+            {loadError}
           </p>
+        ) : versions.length === 0 ? (
+          <EmptyState
+            icon={<HistoryIcon width={20} height={20} />}
+            title="No saved versions yet"
+            description={canEdit ? "Save one above to start tracking history." : "Nothing has been snapshotted yet."}
+            compact
+          />
         ) : (
           <div className={styles.list}>
             {versions.map((version) => (
@@ -147,7 +151,7 @@ export function VersionHistoryPanel({
                 <span className={styles.versionLabel}>
                   {version.label ?? "Untitled snapshot"}
                   {version.kind === "restore-point" ? (
-                    <span className={styles.badge}>auto</span>
+                    <Badge variant="neutral">auto</Badge>
                   ) : null}
                 </span>
                 <span className={styles.versionMeta}>
@@ -159,7 +163,11 @@ export function VersionHistoryPanel({
           </div>
         )}
 
-        {inspectError ? <p className={styles.error}>{inspectError}</p> : null}
+        {inspectError ? (
+          <p className={styles.error} role="alert">
+            {inspectError}
+          </p>
+        ) : null}
 
         {selected ? (
           <div className={styles.preview}>
@@ -182,12 +190,17 @@ export function VersionHistoryPanel({
                     Restore to this version? Your current content will be saved as a new history
                     entry first, so nothing is lost.
                   </span>
-                  {restoreError ? <p className={styles.error}>{restoreError}</p> : null}
+                  {restoreError ? (
+                    <p className={styles.error} role="alert">
+                      {restoreError}
+                    </p>
+                  ) : null}
                   <div className={styles.actions}>
-                    <Button onClick={handleConfirmRestore} disabled={restoring}>
+                    <Button size="sm" onClick={handleConfirmRestore} disabled={restoring}>
                       {restoring ? "Restoring…" : "Confirm restore"}
                     </Button>
                     <Button
+                      size="sm"
                       variant="ghost"
                       onClick={() => setConfirmingRestore(false)}
                       disabled={restoring}
@@ -197,14 +210,13 @@ export function VersionHistoryPanel({
                   </div>
                 </div>
               ) : (
-                <Button variant="secondary" onClick={() => setConfirmingRestore(true)}>
+                <Button variant="secondary" size="sm" onClick={() => setConfirmingRestore(true)}>
                   Restore this version
                 </Button>
               )
             ) : null}
           </div>
         ) : null}
-      </div>
-    </div>
+    </SlideOverPanel>
   );
 }

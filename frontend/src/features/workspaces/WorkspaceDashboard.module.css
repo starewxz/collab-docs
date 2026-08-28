@@ -1,10 +1,35 @@
+.loadingPage {
+  min-height: calc(100vh - var(--topbar-height));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .page {
-  max-width: 720px;
+  max-width: 840px;
   margin: 0 auto;
-  padding: var(--space-8) var(--space-4);
+  padding: var(--space-10) var(--space-5) var(--space-16);
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-10);
+}
+
+.pageHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pageTitle {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 560;
+  letter-spacing: -0.01em;
+}
+
+.pageSubtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
 }
 
 .section {
@@ -14,53 +39,79 @@
 }
 
 .sectionTitle {
-  font-size: 15px;
-  font-weight: 600;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.workspaceList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+.workspaceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
 }
 
-.workspaceRow {
+.workspaceCard {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.workspaceCardInner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3);
+  gap: var(--space-3);
+}
+
+.workspaceCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .workspaceName {
-  font-weight: 500;
-}
-
-.workspaceRole {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .createForm {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .createForm input {
   flex: 1;
+  min-width: 200px;
+}
+
+.invitationList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .invitationRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3);
   gap: var(--space-3);
+  border-color: var(--color-accent-tint-strong);
+  background: var(--color-accent-tint);
 }
 
 .invitationInfo {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .invitationActions {
@@ -69,12 +120,10 @@
   flex-shrink: 0;
 }
 
-.statusBadge {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
 .error {
   color: var(--color-danger);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-sm);
 }

@@ -1,0 +1,52 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.md {
+  width: 30px;
+  height: 30px;
+}
+
+.sm {
+  width: 24px;
+  height: 24px;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--color-bg-inset);
+  color: var(--color-text);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.default.active {
+  background: var(--color-accent-tint);
+  color: var(--color-accent-text);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--color-danger-tint);
+  color: var(--color-danger);
+}
+
+.accent {
+  color: var(--color-accent-text);
+}
+
+.accent:hover:not(:disabled) {
+  background: var(--color-accent-tint);
+}

@@ -44,6 +44,8 @@ export class MetricsService {
   readonly publicRevalidationFailuresTotal: Counter<string>;
   readonly searchRequestsTotal: Counter<string>;
   readonly searchFailuresTotal: Counter<string>;
+  readonly searchIndexJobsTotal: Counter<string>;
+  readonly documentTreeCacheTotal: Counter<string>;
   readonly planLimitRejectionsTotal: Counter<string>;
   readonly subscriptionStateChangesTotal: Counter<string>;
   readonly billingWebhookFailuresTotal: Counter<string>;
@@ -230,6 +232,20 @@ export class MetricsService {
     this.searchFailuresTotal = new Counter({
       name: 'search_failures_total',
       help: 'Total workspace document search requests that failed',
+      registers: [this.registry],
+    });
+
+    this.searchIndexJobsTotal = new Counter({
+      name: 'search_index_jobs_total',
+      help: 'Total async search-index queue jobs processed, by result',
+      labelNames: ['result'],
+      registers: [this.registry],
+    });
+
+    this.documentTreeCacheTotal = new Counter({
+      name: 'document_tree_cache_total',
+      help: 'Total workspace document-tree cache reads, by hit/miss',
+      labelNames: ['result'],
       registers: [this.registry],
     });
 

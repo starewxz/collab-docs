@@ -2,52 +2,41 @@
 
 ## Current Stage
 
-None in progress. Stage 8 (Search, Billing & Plan Limits) is done. Next up per the roadmap is **Stage 9 — Frontend Completion & UX**, not yet started.
+**FINAL — Submission Ready, plus a post-Stage-10 TT gap closure pass.** Stage 10 (Final Testing, Security, Observability & Submission Audit) is complete. No later roadmap stage is defined.
 
-## Read First
+## Verified Final State
 
-- `docs/ai/00-context.md`
-- `docs/ai/01-architecture.md`
-- `docs/ai/02-current-state.md`
-- `docs/ai/06-rules.md`
-- this file
+- Complete product domains: auth/refresh/logout, multi-tenant workspaces and RBAC, invitations, nested documents, Yjs collaboration/presence/reconnect, durable CRDT state and version restore, comments/mentions/notifications, MinIO attachments, public SSR/ISR pages (view **and** edit-by-link), search (sync full-text read path + async index writes), FREE/PRO entitlements, and document-level ACL layered on workspace roles.
+- Tests run for this pass (rebuilt Docker stack): 221 backend unit, 122 backend e2e (1 known pre-existing flaky timing test — "Reconnect / resync" in `collaboration.e2e-spec.ts`, confirmed flaky on the *unmodified* codebase too under full-suite load, not a regression), 93 frontend vitest; backend/frontend lint, typecheck, and production builds all passed. Backend lint has the same two pre-existing test-only `no-unsafe-argument` warnings as every prior stage, zero errors.
+- Docker Compose rebuilt from scratch with all changes; all five services report healthy. Verified live via curl/socket.io-client against the rebuilt stack: register→workspace→document→publish(edit mode)→public page round trip, document-level ACL over both REST and the gateway, async search indexing (not searchable immediately after edit, searchable after the queue processes), tree-cache invalidation, and the streamed public-page response (confirmed genuinely multi-chunk, not a client spinner).
+- Browser automation was **unavailable in this environment** (same limitation noted every stage since Stage 6) — the two new Server Actions and the DnD pointer-drag gesture specifically could not be exercised in a real browser; verified by code review + successful build only.
 
-## Stable Existing Infrastructure
+## Post-Stage-10 Frontend Redesign
 
-Auth, workspaces, RBAC, invitations, documents (CRUD/tree/ordering/archive/restore/publish), realtime collaboration (Yjs sync + presence over `/collab`), durable persistence + version history, comments/mentions/notifications/attachments (Stage 6), public sharing + SSR/ISR + SEO (Stage 7), workspace-scoped search (Postgres FTS) + billing/plan limits (Stage 8) — all implemented and tested (199 backend unit + 109 backend e2e + 74 frontend tests, all passing as of this handoff, verified against a freshly rebuilt Docker stack including a live curl-driven register→workspace→document→search→mock-pay round trip). Don't re-verify from scratch; trust `02-current-state.md`, spot-check only what you're about to touch.
+A full visual/UX redesign pass followed Stage 10 — every user-facing page restyled onto a new `app/globals.css` design-token system (color/type/spacing/radius/motion, dark mode via `prefers-color-scheme`), with new shared primitives (`IconButton`, `Badge`, `Avatar`, `Tabs`, `Tooltip`, `Menu`, `Skeleton`, `FormField`) and a hand-rolled icon set. No backend, API contract, or Yjs/CRDT behavior changed — see `02-current-state.md`'s "Frontend Visual Redesign" entry and `05-frontend.md`'s "UI" section for specifics.
 
-## Current Objective
+## Post-Stage-10 Final TT Gap Closure
 
-None assigned yet. When Stage 9 is requested: a UX completion pass across all prior stages, per `07-roadmap.md`. This is polish/completion of existing functionality, not new backend domains.
+Eight specific gaps closed in one pass: document-level ACL, public edit-by-link + expiry, sidebar drag-and-drop, streaming SSR, Server Actions, async search indexing, a Redis document-tree read cache, and dev/staging config profiles. Full detail in `02-current-state.md`'s "Final TT Gap Closure" entry, `03-api.md`/`04-database.md` for the new endpoints/schema, `05-frontend.md` for the frontend pieces, and ADR-022 through ADR-028 in `08-decisions.md` for the reasoning behind each. Two real pre-existing-suite issues found and fixed while doing this: the `publishing.e2e-spec.ts` "public JSON has exactly these keys" test needed updating (not weakening) for the new, intentional `mode` field, and the working tree had a broken build state from an earlier uncommitted session (missing `globals.css`/`Button`/`Card`/`Input` CSS) — fixed as a side effect of the redesign pass, documented there.
 
-## Reuse (exact names)
+## Stable Boundaries
 
-- `WorkspacePermissionsService`/`WorkspaceMembershipGuard` — the authorization backbone every stage has used; `EntitlementsService` (Stage 8) is the parallel, deliberately-separate plan/entitlement axis — don't merge the two.
-- `features/*/api.ts` + slide-over-panel conventions (`VersionHistoryPanel`/`CommentsPanel`/`AttachmentsPanel`) — the established shape for any new panel-style UI.
-- `components/ui/{Button,Input,Card,Spinner,EmptyState}` — the only shared primitives; no Dialog/Modal component exists yet beyond Stage 8's one-off `SearchDialog` (not extracted into `components/ui` since nothing else needed a generic modal shell yet - worth doing if Stage 9 adds a second one).
-- `lib/api-error.ts`'s `isApiError`/`isPlanLimitError` — any new error-surfacing UI should check `isPlanLimitError` first (structured `code`/`limitType`/`limit`/`current`/`plan`) before falling back to a generic message, now that `GlobalExceptionFilter` actually preserves those fields (Stage 8 fix).
-- The internal-vs-public URL split pattern (ADR-016 MinIO, ADR-017 frontend revalidation) — check whether any new cross-container call needs the internal-DNS or browser-facing address; this class of bug has bitten multiple times.
-- `PLAN_LIMITS` (`backend/src/modules/billing/plan-limits.ts`) — the one place plan numbers live; if Stage 9 adds any UI that displays or reasons about limits, read from the `GET .../billing` response, never hardcode a number.
+- Keep `WorkspacePermissionsService` (authorization) separate from `EntitlementsService` (plan limits) separate from `DocumentPermissionsService` (document-level ACL) — three independent axes that must each pass, not one merged check. See ADR-020/022.
+- Keep access tokens in memory and refresh tokens in the httpOnly cookie/hash-at-rest rotation model. Server Actions that need backend auth take the access token as a bound argument from the client — **never** have a Server Action independently read/exchange the refresh cookie (races the client's own refresh cycle against reuse-detection — see ADR-028).
+- Keep public rendering sourced from durable Yjs state and rendered as escaped JSX; never introduce unsafe HTML. The anonymous `join-public` gateway path (edit-by-link) reuses the exact same `findPublishedBySlug` existence/expiry check as the public REST read — don't add a second, divergent check.
+- Reuse `SlideOverPanel`, `ConfirmDialog`, `ToastProvider`, `useFocusTrap`, and the existing API-error formatting utilities.
+- For new UI, reuse the `components/ui/` primitives and `app/globals.css` tokens introduced in the post-Stage-10 redesign rather than hand-rolling new styles or a second styling approach.
+- Any new environment-gated security-sensitive behavior should check `AppConfigService.isProductionLike`, not a fresh `nodeEnv === 'production'` comparison (ADR-026).
+- Any document-tree-shaping mutation in `DocumentsService` must call `invalidateTree(workspaceId)` (ADR-025) — grep for existing call sites before adding a ninth mutation method.
+- Preserve the fixed non-null-identifier checks at the two TypeORM `orIgnore()` sites in billing and notifications.
 
-## Do Not Touch
+## Known Non-blocking Limitations
 
-- Auth architecture (JWT strategy, refresh rotation, cookie config) unless a concrete Stage 9 requirement forces it.
-- Document tree/CRUD/ordering/archive/publish logic, the live sync/presence/persistence pipeline, search/billing/entitlement logic (Stage 8), or the Stage 6/7 modules (comments/notifications/attachments/public) — Stage 9 is a UX pass on top of these, not a rewrite.
-- Docker/CI/logging/metrics foundation.
-- `WorkspacePermissionsService`'s existing methods, `EntitlementsService`'s existing assertions — add to them if a concrete need arises, don't restructure.
-- `proxy.ts`'s `/p/*` existence-check gate (ADR-018) — a deliberate, documented workaround, not incidental code to simplify away.
-- `GlobalExceptionFilter`'s extra-field preservation (ADR-020's fix) — needed by any structured-error UI, not just billing's.
+The canonical list remains in `02-current-state.md`: mock rather than live Stripe, in-app/dev-token rather than email delivery, no text-range comment anchors, no upload progress bar, full-state Yjs bootstrap/persistence optimized for simplicity rather than very large documents, and external-URL image blocks separate from MinIO attachments. (Sidebar drag-and-drop, previously listed here, is now implemented — see ADR-027.)
 
-## Do Not Start Yet
+## Operational Notes
 
-Stage 10 (hardening).
-
-## Known follow-ups from Stage 8 (not blockers, just worth knowing)
-
-- No real payment provider (Stripe or otherwise) - Stage 8 shipped a mock/dev billing flow behind a `PaymentProvider` interface boundary specifically designed so a real integration only replaces `MockPaymentProvider` + deletes the dev-only `mock-pay` shortcut; `applyEvent`/the webhook controller stay as-is. Not required by the original scope.
-- Only FREE/PRO exist; no third tier.
-- Search covers document title + content only (Postgres FTS) - comments, version history, and attachment metadata are explicitly out of scope, per the original Stage 8 requirement.
-- `SearchDialog` is a one-off component, not extracted into `components/ui` as a reusable Dialog/Modal primitive - fine for now since it's the only modal in the app, but the next thing needing a modal shell should probably extract one rather than copy-pasting the backdrop/panel/escape-key pattern.
-- Attachment storage limit enforcement is a lighter count-then-check with no transactional lock (documented, accepted trade-off given uploads are already async/two-phase) - unlike document/member limits, which are lock-serialized. If storage ever needs to be a true hard invariant, it would need the same `lockWorkspace` treatment.
-- No customer portal / "manage subscription" UI beyond the in-app Upgrade/Downgrade buttons - not applicable without a real payment provider behind it.
-- Interactive browser click-through of the UI has never been performed in this environment (no browser automation was available in any stage, including Stage 8 where the Claude-in-Chrome extension wasn't connected when attempted) - every stage has instead been verified live via real HTTP/socket.io-client/curl scripts against local and Docker-built backends/frontend, plus build/lint/test on both sides. If Stage 9 is a UX-focused pass, actually getting browser automation working (or having a human click through) would be unusually valuable here specifically, more so than in prior backend-heavy stages.
+- Do not commit unless explicitly asked.
+- Copy `.env.example` to `.env` and provide strong JWT, revalidation, and billing webhook secrets before startup. For a staging deployment, layer `.env.staging.example` on top (see README's "Environments" section) — do not reuse development or production secrets.
+- `docker compose up -d --build` now performs migrations automatically; verify all five health checks with `docker compose ps`. The new `1787920200000-AddDocumentAccessControl` migration must be present alongside the previous 8.
+- The isolated `collab-audit` containers and volumes from Stage 10 were removed after verification; this pass's Docker rebuild reused the existing `next-test` stack/volumes in place (not a fresh volume) — verify against a clean volume before a real submission if that matters for the grading environment.

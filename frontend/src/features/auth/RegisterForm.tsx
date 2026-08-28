@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { Button, Card, Input } from "@/components/ui";
+import { Button, Card, FormField, Input } from "@/components/ui";
 import { isApiError } from "@/lib/api-error";
 import { useAuth } from "./AuthProvider";
 import styles from "./AuthForm.module.css";
@@ -51,57 +51,58 @@ export function RegisterForm() {
 
   return (
     <div className={styles.wrapper}>
+      <Link href="/" className={styles.brand} aria-label="Collab Docs home">
+        <span className={styles.brandMark} aria-hidden="true">C</span>
+        <span>Collab Docs</span>
+      </Link>
       <Card className={styles.card}>
         <h1 className={styles.title}>Create your account</h1>
         <form onSubmit={handleSubmit} noValidate>
           <div className={styles.row}>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="firstName">
-                First name
-              </label>
+            <FormField label="First name" htmlFor="firstName" className={styles.field}>
               <Input
                 id="firstName"
                 autoComplete="given-name"
+                aria-invalid={Boolean(error)}
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
               />
-            </div>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="lastName">
-                Last name
-              </label>
+            </FormField>
+            <FormField label="Last name" htmlFor="lastName" className={styles.field}>
               <Input
                 id="lastName"
                 autoComplete="family-name"
+                aria-invalid={Boolean(error)}
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
               />
-            </div>
+            </FormField>
           </div>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="email">
-              Email
-            </label>
+          <FormField label="Email" htmlFor="email" className={styles.field}>
             <Input
               id="email"
               type="email"
               autoComplete="email"
+              aria-invalid={Boolean(error)}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="password">
-              Password
-            </label>
+          </FormField>
+          <FormField
+            label="Password"
+            htmlFor="password"
+            className={styles.field}
+            hint={`At least ${MIN_PASSWORD_LENGTH} characters`}
+          >
             <Input
               id="password"
               type="password"
               autoComplete="new-password"
+              aria-invalid={Boolean(error)}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-          </div>
+          </FormField>
           {error ? (
             <p className={styles.error} role="alert">
               {error}

@@ -13,4 +13,5 @@ export interface PublicDocument {
   title: string;
   blocks: PublicBlock[];
   publishedAt: string;
+  mode: "view" | "edit";
 }

@@ -7,8 +7,8 @@
 - Frontend: Next.js 16 (App Router) + TypeScript, React 19
 - Backend: NestJS 11 (modular monolith) + TypeScript strict
 - DB: PostgreSQL 16 + TypeORM (migrations only, `synchronize: false`)
-- Cache/queue backing store: Redis (BullMQ not yet used by any real feature)
-- Object storage: MinIO (not yet used by any real feature)
+- Cache/queue backing store: Redis + BullMQ (notification delivery)
+- Object storage: MinIO (private presigned attachment upload/download)
 - Observability: pino structured logs, Prometheus metrics, correlation IDs, Terminus health
 - Infra: Docker Compose (5 services: postgres, redis, minio, backend, frontend)
 
@@ -28,8 +28,8 @@
 
 ## Stage status
 
-- **Completed: Stage 1** (foundation/infra), **Stage 2** (auth + workspaces + RBAC + invitations), **Stage 3** (document CRUD/tree/ordering/archive-restore), **Stage 4** (realtime Yjs collaboration + presence), **Stage 5** (durable CRDT persistence + version history), **Stage 6** (social — comments, mentions, notifications, attachments), **Stage 7** (public sharing, SSR/ISR, SEO).
-- **Next: Stage 8** (growth — search, billing, plan limits — not started).
+- **Completed:** Stages 1–10, including growth, frontend completion, and the final testing/security/observability/submission audit.
+- **Current:** FINAL — Submission Ready. No later stage is defined.
 
 ## Facts every agent must know
 

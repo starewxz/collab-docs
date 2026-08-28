@@ -63,7 +63,7 @@ describe("documents api", () => {
     );
   });
 
-  it("publishDocument omits the body field when no slug is given", async () => {
+  it("publishDocument sends an empty body when no options are given", async () => {
     const apiFetch = vi.fn().mockResolvedValue({ id: "doc-1" });
     await publishDocument(apiFetch, "ws-1", "doc-1");
 
@@ -75,13 +75,29 @@ describe("documents api", () => {
 
   it("publishDocument includes the slug when provided", async () => {
     const apiFetch = vi.fn().mockResolvedValue({ id: "doc-1" });
-    await publishDocument(apiFetch, "ws-1", "doc-1", "custom-slug");
+    await publishDocument(apiFetch, "ws-1", "doc-1", { slug: "custom-slug" });
 
     expect(apiFetch).toHaveBeenCalledWith(
       "/api/workspaces/ws-1/documents/doc-1/publish",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ slug: "custom-slug" }),
+      }),
+    );
+  });
+
+  it("publishDocument includes mode and expiresAt when provided (TT gap 2)", async () => {
+    const apiFetch = vi.fn().mockResolvedValue({ id: "doc-1" });
+    await publishDocument(apiFetch, "ws-1", "doc-1", {
+      mode: "edit",
+      expiresAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/workspaces/ws-1/documents/doc-1/publish",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ mode: "edit", expiresAt: "2026-09-01T00:00:00.000Z" }),
       }),
     );
   });

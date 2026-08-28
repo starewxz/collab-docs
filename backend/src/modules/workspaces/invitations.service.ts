@@ -115,7 +115,7 @@ export class InvitationsService {
     });
     const dtoOut = this.toDto(invitation, workspace?.name ?? '');
 
-    if (this.config.app.nodeEnv !== 'production') {
+    if (!this.config.isProductionLike) {
       dtoOut.inviteToken = rawToken;
       dtoOut.inviteUrl = `${this.config.app.frontendUrl}/invitations/${rawToken}`;
     }

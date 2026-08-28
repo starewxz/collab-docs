@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { Spinner } from "@/components/ui";
+import { Button, EmptyState, IconButton, SlideOverPanel, Spinner, Tooltip, useToast } from "@/components/ui";
+import { DownloadIcon, PaperclipIcon, TrashIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { isApiError } from "@/lib/api-error";
 import {
@@ -34,6 +35,8 @@ export function AttachmentsPanel({
   onClose: () => void;
 }) {
   const { apiFetch } = useAuth();
+  const { showToast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [attachments, setAttachments] = useState<Attachment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export function AttachmentsPanel({
       }
       await confirmAttachment(apiFetch, workspaceId, documentId, attachment.id);
       reload();
+      showToast(`Uploaded "${file.name}"`);
     } catch (err) {
       setUploadError(isApiError(err) ? err.message : "Failed to upload file.");
     } finally {
@@ -116,40 +120,58 @@ export function AttachmentsPanel({
   }
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <span className={styles.title}>Attachments</span>
-          <button type="button" className={styles.closeButton} onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
+    <SlideOverPanel title="Attachments" onClose={onClose}>
         {canEdit ? (
-          <div>
+          <div className={styles.uploadArea}>
             <input
+              ref={fileInputRef}
               type="file"
               className={styles.fileInput}
               onChange={handleFileSelected}
               disabled={uploading}
+              aria-label="Choose a file to upload"
             />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? "Uploading…" : "Upload a file"}
+            </Button>
             {uploading ? <Spinner label="Uploading" /> : null}
-            {uploadError ? <p className={styles.error}>{uploadError}</p> : null}
+            {uploadError ? (
+              <p className={styles.error} role="alert">
+                {uploadError}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
-        {actionError ? <p className={styles.error}>{actionError}</p> : null}
+        {actionError ? (
+          <p className={styles.error} role="alert">
+            {actionError}
+          </p>
+        ) : null}
 
         {attachments === null ? (
           <Spinner label="Loading attachments" />
         ) : loadError ? (
-          <p className={styles.error}>{loadError}</p>
+          <p className={styles.error} role="alert">
+            {loadError}
+          </p>
         ) : attachments.length === 0 ? (
-          <p className={styles.hint}>No attachments yet.</p>
+          <EmptyState
+            icon={<PaperclipIcon width={20} height={20} />}
+            title="No attachments yet"
+            description={canEdit ? "Upload a file above to attach it to this document." : "Nothing has been attached yet."}
+            compact
+          />
         ) : (
           <div className={styles.list}>
             {attachments.map((attachment) => (
               <div key={attachment.id} className={styles.row}>
+                <PaperclipIcon className={styles.fileIcon} width={16} height={16} />
                 <div className={styles.rowInfo}>
                   <span className={styles.filename}>{attachment.filename}</span>
                   <span className={styles.meta}>
@@ -159,29 +181,33 @@ export function AttachmentsPanel({
                 </div>
                 <div className={styles.rowActions}>
                   {attachment.status === "ready" ? (
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() => handleOpen(attachment)}
-                    >
-                      Open
-                    </button>
+                    <Tooltip label="Open">
+                      <IconButton
+                        size="sm"
+                        aria-label={`Open "${attachment.filename}"`}
+                        onClick={() => handleOpen(attachment)}
+                      >
+                        <DownloadIcon />
+                      </IconButton>
+                    </Tooltip>
                   ) : null}
                   {canEdit ? (
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() => handleRemove(attachment)}
-                    >
-                      Remove
-                    </button>
+                    <Tooltip label="Remove">
+                      <IconButton
+                        size="sm"
+                        variant="danger"
+                        aria-label={`Remove "${attachment.filename}"`}
+                        onClick={() => handleRemove(attachment)}
+                      >
+                        <TrashIcon />
+                      </IconButton>
+                    </Tooltip>
                   ) : null}
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </SlideOverPanel>
   );
 }

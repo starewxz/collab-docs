@@ -1,9 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useMemo, useState } from "react";
-import { Button } from "@/components/ui";
-import { AttachmentsPanel } from "@/features/attachments/AttachmentsPanel";
-import { CommentsPanel } from "@/features/comments/CommentsPanel";
+import { IconButton, Spinner, Tooltip } from "@/components/ui";
+import {
+  CheckIcon,
+  CodeIcon,
+  FileTextIcon,
+  HeadingIcon,
+  HistoryIcon,
+  ImageIcon,
+  ListIcon,
+  MessageIcon,
+  PaperclipIcon,
+} from "@/components/ui/icons";
 import { canComment as canCommentForRole } from "@/features/workspaces/permissions";
 import type { WorkspaceRole } from "@/features/workspaces/types";
 import { getBlocksArray, insertBlockAt, removeBlockAt } from "./blocks";
@@ -13,15 +23,30 @@ import { PresenceBar } from "./PresenceBar";
 import type { BlockType } from "./types";
 import { useCollaboration } from "./useCollaboration";
 import { useYjsObserve } from "./useYjsObserve";
-import { VersionHistoryPanel } from "./VersionHistoryPanel";
 
-const BLOCK_TYPES: { type: BlockType; label: string }[] = [
-  { type: "paragraph", label: "Text" },
-  { type: "heading", label: "Heading" },
-  { type: "bulletListItem", label: "Bullet" },
-  { type: "checkbox", label: "Checkbox" },
-  { type: "codeBlock", label: "Code" },
-  { type: "image", label: "Image" },
+/** These three panels are only ever needed after an explicit toolbar
+ * click, never on first paint - loading them via next/dynamic keeps their
+ * code out of the initial document-page bundle entirely. */
+const VersionHistoryPanel = dynamic(
+  () => import("./VersionHistoryPanel").then((m) => m.VersionHistoryPanel),
+  { ssr: false },
+);
+const CommentsPanel = dynamic(
+  () => import("@/features/comments/CommentsPanel").then((m) => m.CommentsPanel),
+  { ssr: false },
+);
+const AttachmentsPanel = dynamic(
+  () => import("@/features/attachments/AttachmentsPanel").then((m) => m.AttachmentsPanel),
+  { ssr: false },
+);
+
+const BLOCK_TYPES: { type: BlockType; label: string; icon: typeof FileTextIcon }[] = [
+  { type: "paragraph", label: "Text", icon: FileTextIcon },
+  { type: "heading", label: "Heading", icon: HeadingIcon },
+  { type: "bulletListItem", label: "Bullet", icon: ListIcon },
+  { type: "checkbox", label: "Checkbox", icon: CheckIcon },
+  { type: "codeBlock", label: "Code", icon: CodeIcon },
+  { type: "image", label: "Image", icon: ImageIcon },
 ];
 
 export function CollaborativeEditor({
@@ -60,9 +85,17 @@ export function CollaborativeEditor({
 
   if (status === "error") {
     return (
-      <p className={styles.hint}>
+      <p className={styles.hint} role="alert">
         Couldn&apos;t connect to the collaboration session{error ? `: ${error}` : "."}
       </p>
+    );
+  }
+
+  if (status === "connecting") {
+    return (
+      <div className={styles.loading}>
+        <Spinner label="Connecting to document…" />
+      </div>
     );
   }
 
@@ -70,15 +103,23 @@ export function CollaborativeEditor({
     <div className={styles.wrapper}>
       <div className={styles.toolbar}>
         <PresenceBar status={status} collaborators={collaborators} />
-        <Button variant="ghost" onClick={() => setShowComments(true)}>
-          Comments
-        </Button>
-        <Button variant="ghost" onClick={() => setShowAttachments(true)}>
-          Files
-        </Button>
-        <Button variant="ghost" onClick={() => setShowHistory(true)}>
-          History
-        </Button>
+        <div className={styles.toolbarActions}>
+          <Tooltip label="Comments">
+            <IconButton aria-label="Open comments" onClick={() => setShowComments(true)}>
+              <MessageIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label="Files">
+            <IconButton aria-label="Open attachments" onClick={() => setShowAttachments(true)}>
+              <PaperclipIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label="History">
+            <IconButton aria-label="Open version history" onClick={() => setShowHistory(true)}>
+              <HistoryIcon />
+            </IconButton>
+          </Tooltip>
+        </div>
       </div>
 
       {showHistory ? (
@@ -110,13 +151,18 @@ export function CollaborativeEditor({
       ) : null}
 
       {!canEdit ? (
-        <p className={styles.readOnlyBanner}>You have read-only access to this document.</p>
+        <p className={styles.readOnlyBanner} role="status">
+          <EyeIcon />
+          {canComment
+            ? "You have read-only access to this document — you can still comment."
+            : "You have read-only access to this document."}
+        </p>
       ) : null}
 
       <div className={styles.blocks}>
         {blocks.length === 0 ? (
           <p className={styles.hint}>
-            {canEdit ? "Add your first block below." : "This document is empty."}
+            {canEdit ? "This document is empty. Add a block below to start writing." : "This document is empty."}
           </p>
         ) : (
           blocks
@@ -134,18 +180,28 @@ export function CollaborativeEditor({
 
       {canEdit ? (
         <div className={styles.addBlockRow}>
-          {BLOCK_TYPES.map(({ type, label }) => (
+          {BLOCK_TYPES.map(({ type, label, icon: Icon }) => (
             <button
               key={type}
               type="button"
               className={styles.addButton}
               onClick={() => handleAddBlock(type)}
             >
-              + {label}
+              <Icon width={13} height={13} />
+              {label}
             </button>
           ))}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="2.7" />
+    </svg>
   );
 }

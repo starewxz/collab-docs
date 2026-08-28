@@ -44,6 +44,7 @@ function buildService(invitation: WorkspaceInvitation | null) {
 
   const config = {
     app: { nodeEnv: 'test', frontendUrl: 'http://localhost:3000' },
+    isProductionLike: false,
   };
   const logger = { setContext: jest.fn(), info: jest.fn(), warn: jest.fn() };
   const metrics = { workspaceInvitationsTotal: { inc: jest.fn() } };

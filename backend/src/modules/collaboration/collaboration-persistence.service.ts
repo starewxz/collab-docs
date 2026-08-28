@@ -1,12 +1,14 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
+import type { Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
-import { DocumentsService } from '../documents/documents.service';
+import { QueueName } from '../../queue/queue.constants';
 import { DocumentVersionKind } from './document-version-kind.enum';
 import { DocumentVersion } from './entities/document-version.entity';
-import { decodeState, encodeBlocksSnapshot } from './yjs-document.util';
+import type { SearchIndexJobPayload } from './search-index.processor';
 
 /** Trailing-throttle window: many rapid edits within this window collapse
  * into a single write, but a document being edited continuously still gets
@@ -30,7 +32,8 @@ export class CollaborationPersistenceService implements OnModuleDestroy {
     private readonly versions: Repository<DocumentVersion>,
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
-    private readonly documentsService: DocumentsService,
+    @InjectQueue(QueueName.SEARCH_INDEX)
+    private readonly searchIndexQueue: Queue<SearchIndexJobPayload>,
   ) {
     this.logger.setContext(CollaborationPersistenceService.name);
     const configured = Number(process.env.COLLAB_PERSIST_INTERVAL_MS);
@@ -119,35 +122,42 @@ export class CollaborationPersistenceService implements OnModuleDestroy {
       return;
     }
 
-    await this.updateSearchIndex(documentId, state);
+    await this.updateSearchIndex(documentId);
   }
 
-  /** Stage 8 search: extracts plain text from the state just durably
-   * written (never a live in-memory Y.Doc) and keeps
-   * `documents.contentText` in sync, at the same trailing-throttle cadence
-   * as the durability buffer itself - not per keystroke. A failure here is
-   * a secondary side-effect of an already-successful durability write and
-   * must never surface as one - logged only, same rationale as
-   * RevalidationService/CommentsService.safeEnqueue. */
-  private async updateSearchIndex(
-    documentId: string,
-    state: Uint8Array,
-  ): Promise<void> {
+  /** Stage 8 search, made async in a later pass: rather than decoding and
+   * writing `documents.contentText` inline here, this only enqueues a
+   * `SearchIndexProcessor` job - the decode + write happens off the hot
+   * edit-flush path, in the processor, which re-reads the durable buffer
+   * itself rather than trusting whatever `state` was current at enqueue
+   * time (so out-of-order/duplicate job delivery is harmless - see the
+   * processor's docstring). `jobId: documentId` is a BullMQ-level
+   * secondary throttle: while a job for this document is still
+   * waiting/active, re-adding it with the same id is a no-op instead of
+   * piling up redundant jobs for one document mid-edit-burst, the same
+   * throttling intent as `scheduleFlush`'s `pendingFlushes` map. A failure
+   * to even enqueue is a secondary side-effect of an already-successful
+   * durability write and must never surface as one - logged only, same
+   * rationale as RevalidationService/CommentsService.safeEnqueue. */
+  private async updateSearchIndex(documentId: string): Promise<void> {
     try {
-      const blocks = encodeBlocksSnapshot(decodeState(state));
-      const contentText = blocks
-        .map((b) => b.text)
-        .filter((t): t is string => !!t)
-        .join(' ');
-      await this.documentsService.updateSearchContent(documentId, contentText);
+      await this.searchIndexQueue.add(
+        'index',
+        { documentId },
+        {
+          jobId: documentId,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+        },
+      );
     } catch (err) {
       this.logger.warn(
         {
-          event: 'search_index_update_failed',
+          event: 'search_index_enqueue_failed',
           documentId,
           error: (err as Error).message,
         },
-        'search_index_update_failed',
+        'search_index_enqueue_failed',
       );
     }
   }

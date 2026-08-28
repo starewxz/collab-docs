@@ -105,6 +105,14 @@ export class WorkspacePermissionsService {
     return role === WorkspaceRole.OWNER || role === WorkspaceRole.ADMIN;
   }
 
+  /** Gates document-level ACL management (restricting a document, sharing/
+   * unsharing a `DocumentCollaborator`) - a permission-granting action, so
+   * held to the same OWNER/ADMIN bar as member role changes, not the
+   * lower `canEditDocument` bar used for ordinary content mutations. */
+  canManageDocumentAccess(role: WorkspaceRole): boolean {
+    return role === WorkspaceRole.OWNER || role === WorkspaceRole.ADMIN;
+  }
+
   assertCanInviteMembers(role: WorkspaceRole): void {
     if (!this.canInviteMembers(role)) {
       throw new ForbiddenException(
@@ -166,6 +174,14 @@ export class WorkspacePermissionsService {
     if (!this.canManageWorkspaceSettings(role)) {
       throw new ForbiddenException(
         'Only the workspace owner can manage this setting',
+      );
+    }
+  }
+
+  assertCanManageDocumentAccess(role: WorkspaceRole): void {
+    if (!this.canManageDocumentAccess(role)) {
+      throw new ForbiddenException(
+        'Only an owner or admin can manage document access',
       );
     }
   }

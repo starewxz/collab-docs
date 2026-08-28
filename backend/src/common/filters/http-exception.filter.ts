@@ -68,10 +68,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
     const payload: ErrorResponseBody = {
       statusCode: status,
-      message:
-        this.config.app.nodeEnv === 'production'
-          ? 'Internal server error'
-          : ((exception as Error)?.message ?? 'Internal server error'),
+      message: this.config.isProductionLike
+        ? 'Internal server error'
+        : ((exception as Error)?.message ?? 'Internal server error'),
       error: 'Internal Server Error',
       path: request.url,
       correlationId,

@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { FileTextIcon, SearchIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { isApiError } from "@/lib/api-error";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { searchDocuments } from "./api";
 import styles from "./SearchDialog.module.css";
 import type { DocumentSearchResult } from "./types";
@@ -54,6 +56,8 @@ export function SearchDialog({
   const { apiFetch } = useAuth();
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, onClose);
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocumentSearchResult[]>([]);
@@ -97,11 +101,6 @@ export function SearchDialog({
   }
 
   function handleKeyDown(event: React.KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, results.length - 1));
@@ -124,21 +123,27 @@ export function SearchDialog({
   return (
     <div className={styles.backdrop} onClick={onClose} role="presentation">
       <div
+        ref={panelRef}
         className={styles.panel}
         role="dialog"
         aria-modal="true"
         aria-label="Search documents"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <input
-          ref={inputRef}
-          className={styles.input}
-          type="text"
-          placeholder="Search documents…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <div className={styles.inputRow}>
+          <SearchIcon className={styles.inputIcon} />
+          <input
+            ref={inputRef}
+            className={styles.input}
+            type="text"
+            placeholder="Search documents…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <kbd className={styles.escHint}>Esc</kbd>
+        </div>
 
         <div className={styles.results}>
           {!trimmedQuery ? (
@@ -146,7 +151,9 @@ export function SearchDialog({
           ) : phase === "loading" ? (
             <p className={styles.hint}>Searching…</p>
           ) : phase === "error" ? (
-            <p className={styles.error}>{error}</p>
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
           ) : results.length === 0 ? (
             <p className={styles.hint}>No documents match &ldquo;{trimmedQuery}&rdquo;.</p>
           ) : (
@@ -161,12 +168,15 @@ export function SearchDialog({
                     onMouseEnter={() => setActiveIndex(index)}
                     onClick={() => goTo(result)}
                   >
-                    <span className={styles.itemTitle}>{result.title}</span>
-                    {result.snippet ? (
-                      <span className={styles.itemSnippet}>
-                        {renderSnippet(result.snippet)}
-                      </span>
-                    ) : null}
+                    <FileTextIcon className={styles.itemIcon} width={15} height={15} />
+                    <span className={styles.itemBody}>
+                      <span className={styles.itemTitle}>{result.title}</span>
+                      {result.snippet ? (
+                        <span className={styles.itemSnippet}>
+                          {renderSnippet(result.snippet)}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 </li>
               ))}

@@ -38,3 +38,19 @@ export function isPlanLimitError(error: unknown): error is ApiError & {
 } {
   return isApiError(error) && error.body?.code === "PLAN_LIMIT_EXCEEDED";
 }
+
+/** A friendlier take on a PLAN_LIMIT_EXCEEDED error than the raw backend
+ * message alone (Stage 9) - states the limit, current usage when the
+ * backend included it, and a concrete next step, instead of a generic
+ * "request failed" style error. */
+export function formatPlanLimitMessage(
+  error: ApiError & { body: ApiErrorBody & { code: "PLAN_LIMIT_EXCEEDED" } },
+  nextStep: string,
+): string {
+  const { limit, current, plan } = error.body;
+  const usage =
+    typeof limit === "number" && typeof current === "number"
+      ? ` (${current}/${limit} used on the ${(plan ?? "current").toUpperCase()} plan).`
+      : "";
+  return `${error.message}${usage} ${nextStep}`;
+}

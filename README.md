@@ -1,162 +1,107 @@
 # Collab Docs
 
-A Notion-like collaborative document workspace. **Stages 1 (foundation/infrastructure) and 2 (auth, workspaces, RBAC, invitations) are complete.** Documents, real-time collaboration, comments, billing, search, and file upload are not implemented yet. See `docs/ai/` for the current, verified implementation state — this README is not kept in lockstep with every stage.
-
-## Stack
-
-- **Frontend**: Next.js (App Router) + TypeScript
-- **Backend**: NestJS (modular monolith) + TypeScript, strict mode
-- **Database**: PostgreSQL + TypeORM (migrations, no `synchronize`)
-- **Cache / Queue backing store**: Redis
-- **Job queue**: BullMQ
-- **Object storage**: MinIO (S3-compatible)
-- **Observability**: structured logging (pino), Prometheus metrics, correlation IDs, Terminus health checks
-- **Infra**: Docker Compose
+Collab Docs is a submission-ready, Notion-like collaborative document workspace. Teams organize nested documents, edit together with Yjs, discuss work in comment threads, manage files and versions, search durable content, publish safe public pages, and enforce workspace roles and plan limits.
 
 ## Architecture
 
-The backend is a **modular monolith**: one deployable NestJS app, organized into modules with clear boundaries, rather than microservices. This keeps Stage 1 simple while leaving room for future domains (`auth`, `users`, `workspaces`, `documents`, `collaboration`, `comments`, `notifications`, `billing`, `search`, `storage`, `analytics`) to be added as self-contained modules under `backend/src/modules` without restructuring anything that exists today. See `backend/src/modules/README.md` for the reserved boundaries.
+- **Frontend:** Next.js 16 App Router, React 19, and TypeScript. Pages and layouts remain Server Components by default; interactive auth, workspace, editor, dialog, and panel surfaces are narrowly scoped Client Components.
+- **Backend:** NestJS 11 modular monolith with controller → service → TypeORM repository boundaries.
+- **Data:** PostgreSQL 16 with migrations only (`synchronize: false`), Redis/BullMQ for notifications, and private MinIO object storage for attachments.
+- **Operations:** Docker Compose, pino JSON logs with correlation IDs, Terminus health checks, Prometheus metrics, Swagger, and GitHub Actions CI.
 
-Infrastructure concerns (database, redis, queue, storage, health, metrics, logging) are separated from business modules from day one, so business modules can depend on them without ever reaching into `node_modules` clients directly.
+Authenticated browser calls go directly to the API. Access JWTs live only in memory; rotating opaque refresh tokens use an httpOnly cookie and are stored only as hashes. Roles are loaded from PostgreSQL on each request. `WorkspacePermissionsService` handles OWNER/ADMIN/EDITOR/VIEWER authorization, while `EntitlementsService` independently handles plan limits.
 
-## Repository structure
+## Collaboration and persistence
 
-```
-collab-docs/
-├── frontend/                Next.js App Router app
-│   └── src/
-│       ├── app/              routes, layouts, loading/error boundaries
-│       ├── components/ui/    Button, Input, Card, Spinner, EmptyState
-│       ├── features/         feature modules (empty until Stage 2+)
-│       ├── lib/               server-side helpers (e.g. backend fetch)
-│       ├── config/            env config (server vs public)
-│       └── types/
-├── backend/                 NestJS app
-│   └── src/
-│       ├── common/            filters, guards, interceptors, decorators,
-│       │                      logging, metrics — cross-cutting infra
-│       ├── config/             typed env config + validation
-│       ├── database/           TypeORM data source, module, migrations
-│       ├── redis/               shared Redis client
-│       ├── queue/               BullMQ connection + queue name registry
-│       ├── storage/             MinIO client
-│       ├── health/              Terminus health checks
-│       └── modules/            business modules (empty — see README there)
-├── docker-compose.yml
-├── .env.example
-└── .github/workflows/ci.yml
-```
+Each active document has an in-memory Yjs `Y.Doc` and awareness state behind the `/collab` Socket.IO namespace. Concurrent client updates are merged as CRDT operations and relayed to peers; VIEWER and outsider writes are rejected server-side.
 
-## Server vs Client Components (Next.js)
+Full Yjs state is persisted to a throttled `document_versions` durability row and hydrated when a session is recreated. Manual snapshots and restore points share that persisted representation. Restore first preserves the current state, replaces document content in a Yjs transaction, and broadcasts the resulting update so active clients converge without reloading.
 
-This project is evaluated on getting this boundary right, so the rule is explicit:
+## Public pages, search, storage, and billing
 
-- **Server Components by default.** Layouts, pages, and anything that only renders data or static content stays a Server Component. No blanket `'use client'` at the top of large trees.
-- **Client Components only where the browser is required**: forms with interactive state, the future Yjs editor, drag & drop, presence indicators, dialogs, interactive comments, or any component using hooks/browser APIs. Mark only the smallest component that needs it, not its parent tree.
-- Route groups `(auth)` and `(workspace)` are reserved for Stage 2+ pages (see the `README.md` in each). Routes outside a group (like the homepage) are public by default.
+- `/p/[slug]` is a Server Component with ISR, metadata, canonical/OG tags, and on-demand revalidation for publication-state changes. It reads only persisted public content. React text escaping plus URL-scheme allowlisting prevents stored XSS, and public responses omit private workspace data.
+- Search uses a PostgreSQL generated `tsvector` with a GIN index over title and durable document text. Queries are parameterized, workspace-scoped, permission-aware, and exclude archived documents.
+- Attachments use short-lived presigned MinIO PUT/GET URLs. Metadata is tenant-scoped; MIME and declared size are validated before upload, actual object size is verified on confirmation, and the bucket is not public.
+- Every workspace has a FREE or PRO subscription. A replaceable mock payment provider feeds the same idempotent webhook core used by the webhook endpoint. Unique event IDs prevent repeated effects; backend document, member, feature, and storage limits cannot be bypassed through direct API calls. Downgrades never delete existing data.
 
-## Frontend/backend URL split
-
-- `BACKEND_INTERNAL_URL` — server-only, used by Server Components/Route Handlers to call the backend over the Docker network (`http://backend:4000`). Never exposed to the browser.
-- `NEXT_PUBLIC_API_URL` — inlined into the browser bundle at **build time** (not runtime). Only ever put non-secret, publicly-reachable URLs here.
-
-The homepage is a Server Component that calls `getBackendStatus()` (`frontend/src/lib/backend.ts`), which hits the backend's `/api/health/live` server-side — this is the proof that the two containers can talk to each other, not a permanent UI feature.
-
-## Getting started (Docker)
+## Run with Docker
 
 ```bash
 cp .env.example .env
+# Fill JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, REVALIDATE_SECRET,
+# and BILLING_WEBHOOK_SECRET with strong random values.
 docker compose up -d --build
-docker compose ps   # all 5 services should show (healthy)
+docker compose ps
 ```
 
-Then:
+The backend container runs all pending TypeORM migrations before starting the API. All five services should report healthy.
 
-- Frontend: http://localhost:3001 (default `FRONTEND_HOST_PORT`; see below)
-- Backend health: http://localhost:4000/api/health
-- Swagger docs: http://localhost:4000/api/docs
-- Metrics: http://localhost:4000/api/metrics
-- MinIO console: http://localhost:9001
+- App: <http://localhost:3001>
+- API and Swagger: <http://localhost:4000/api> · <http://localhost:4000/api/docs>
+- Health: <http://localhost:4000/api/health> and `/api/health/live`
+- Metrics: <http://localhost:4000/api/metrics>
+- MinIO console: <http://localhost:9001>
 
-### Port conflicts
+Host ports are configurable through the `*_HOST_PORT` variables documented in `.env.example`. `NEXT_PUBLIC_API_URL` is public and build-time only; never place secrets in a `NEXT_PUBLIC_*` variable. `BACKEND_INTERNAL_URL` and `FRONTEND_INTERNAL_URL` are container-network addresses used for server-side fetches and revalidation.
 
-Default **container-internal** ports never change (services always reach each other as `postgres:5432`, `redis:6379`, `minio:9000`). If a **host** port is already taken on your machine, override it in `.env` — see the commented `*_HOST_PORT` block in `.env.example`. If you change `FRONTEND_HOST_PORT`, also update `FRONTEND_URL` so CORS keeps working.
+## Environments
 
-## Local development (without Docker)
+`NODE_ENV` selects one of four profiles (`backend/src/config/env.validation.ts`). There is one canonical env template (`.env.example`) plus a small staging overlay (`.env.staging.example`) — the goal is one source of truth per value, not a parallel copy of every variable per environment.
 
-Run infra only, then the apps natively:
+| Environment | `NODE_ENV` | Template | Notes |
+|---|---|---|---|
+| Development | `development` (default) | `.env.example` | `docker compose up` or `npm run start:dev`/`npm run dev` locally. Pretty-printed debug logs, real error messages in API responses, and invitation responses include the raw dev token/URL (no email delivery exists yet — see [Known limitations](#known-limitations)) so you can accept an invite without a mailbox. |
+| Test | `test` | `backend/test/.env.test` (already checked in; used automatically by `npm run test:e2e`) | Same relaxed behavior as development, plus a short `COLLAB_PERSIST_INTERVAL_MS` so persistence/search-indexing tests don't wait out the real 3s throttle. |
+| Staging | `staging` | `.env.example` + `.env.staging.example` | A real, network-reachable deployment for pre-production verification — treated as **production-like** for every security-sensitive check: secure (`Secure`) refresh cookies, hidden internal error detail, structured JSON logs, and **no** dev-token exposure in invitation responses (see `AppConfigService.isProductionLike`, the single place this distinction is made). Use its own database/Redis/MinIO and its own secrets — never copy production secrets into staging. |
+| Production | `production` | `.env.example` (all values supplied for real, none left as placeholders) | Same production-like security posture as staging. `COOKIE_DOMAIN` must be set if the frontend/backend are on different subdomains; all `*_SECRET` values must be freshly generated (`openssl rand -hex 32`), never reused across environments. |
 
-```bash
-docker compose up -d postgres redis minio
-```
+`.env.staging.example` only lists the values that differ from `.env.example` (`NODE_ENV=staging` plus the URL/domain placeholders you'd point at a real staging host) — copy `.env.example` first, then apply the staging overlay on top, rather than maintaining two full copies of every variable.
 
-Backend (`backend/.env`, or exported vars) needs `POSTGRES_HOST`, `REDIS_HOST`, and `MINIO_ENDPOINT` set to `localhost` (and matching whatever host ports you published) instead of the Docker service names:
+## Local development
+
+Start PostgreSQL, Redis, and MinIO, then run migrations and the applications:
 
 ```bash
 cd backend
-npm install
+npm ci
 npm run migration:run
 npm run start:dev
 ```
 
-Frontend:
-
 ```bash
 cd frontend
-npm install
+npm ci
 BACKEND_INTERNAL_URL=http://localhost:4000 npm run dev
 ```
 
-## Environment variables
+When infrastructure is published on non-default host ports, override the corresponding backend environment values (the repository Compose defaults are PostgreSQL `5434` and Redis `6380`).
 
-See `.env.example` for the full list, grouped by category (application, Postgres, Redis, MinIO, JWT placeholders for Stage 2, frontend). Validated at startup via Joi (`backend/src/config/env.validation.ts`) — the app refuses to start with missing/invalid config rather than falling back to silent defaults for anything security- or connectivity-relevant.
-
-## Migrations
-
-TypeORM migrations live in `backend/src/database/migrations`. `synchronize` is always `false`.
+## Tests and CI
 
 ```bash
 cd backend
-npm run migration:generate   # after changing/adding an entity
-npm run migration:run
-npm run migration:revert
+npm run lint
+npm run build
+npm test
+npm run test:e2e
+
+cd ../frontend
+npm run lint
+npm test
+npm run build
 ```
 
-`migration:run:prod` runs against the compiled `dist/` output (no ts-node), for use in deployment where only production dependencies are installed.
+The frontend build performs the TypeScript check. `.github/workflows/ci.yml` runs backend lint/build/unit/e2e against PostgreSQL, Redis, and MinIO, and frontend lint/tests/build on pushes to `main` and pull requests. CI configuration can be inspected locally, but a successful GitHub-hosted runner is only established by an actual Actions run.
 
-## Health, metrics, logging
+## Observability
 
-- `GET /api/health` — per-dependency status (Postgres, Redis, MinIO) via Terminus. Returns `503` if any dependency is down, with per-service detail preserved.
-- `GET /api/health/live` — lightweight liveness probe, no dependency checks.
-- `GET /api/metrics` — Prometheus exposition format (`http_requests_total`, `http_request_duration_seconds`, plus default Node process metrics). Additional metrics (`collab_connections_current`, `crdt_updates_total`, `queue_jobs_processed_total`, `billing_webhooks_total`) are added by the modules that produce those events in later stages.
-- Structured JSON logs (pino) include `correlationId`, `method`, `path`, `statusCode`, `duration` per request. Headers/bodies are never serialized into logs, so secrets can't leak in even by accident.
-- Correlation IDs: send `x-correlation-id` to propagate your own, otherwise one is generated. It's echoed in the response header, present in every log line for that request, and included in every error response body.
+`GET /api/health` reports PostgreSQL, Redis, and MinIO separately; `/api/health/live` is the lightweight process probe. Structured request logs include an accepted or generated `x-correlation-id`, and error responses return it for support correlation. Prometheus metrics cover HTTP latency/counts, authentication, documents, collaboration sessions and persistence, queues/notifications, attachments, publishing/revalidation, search, plan-limit rejections, and billing/webhook failures.
 
-## API docs
+## Known limitations
 
-Swagger UI: `GET /api/docs`. All routes are served under the `/api` prefix.
-
-## Testing
-
-Backend:
-
-```bash
-cd backend
-npm test        # unit tests, no infra required
-npm run test:e2e   # boots the real app - requires Postgres/Redis/MinIO running
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm test         # vitest, unit-level only
-```
-
-## CI
-
-`.github/workflows/ci.yml` runs on every push/PR: backend (`lint` → `build` → unit tests → e2e tests against Postgres/Redis/MinIO) and frontend (`lint` → unit tests → `build`, which also type-checks).
-
-## What's not here yet
-
-Auth, users, workspaces, RBAC, and invitations are implemented (Stage 2). Not yet implemented: documents/document CRUD, Yjs/CRDT collaboration, comments, billing, search indexing, and file upload endpoints. See `docs/ai/02-current-state.md` for the verified, detailed breakdown and `docs/ai/07-roadmap.md` for what's next.
+- Billing uses the intentional mock provider boundary rather than live Stripe.
+- Notifications and invitations are in-app/dev-token flows; there is no real email or push provider.
+- Comments are document-level with root + reply threading, not Yjs text-range anchors.
+- Document ordering uses explicit up/down controls and fractional positions rather than drag-and-drop or position rebalancing.
+- Yjs bootstrap sends full state on join and persistence stores a full-state buffer rather than an append-only update log; this favors correctness and simplicity over very-large-document bandwidth/write optimization.
+- Editor image blocks reference external URLs; MinIO attachments are managed separately and are not embedded in published content.

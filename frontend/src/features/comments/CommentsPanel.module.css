@@ -1,42 +1,14 @@
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  justify-content: flex-end;
-  z-index: 50;
-}
-
-.panel {
-  width: 380px;
-  max-width: 90vw;
-  height: 100%;
-  background: var(--color-bg);
-  border-left: 1px solid var(--color-border);
+.rootComposer {
   display: flex;
   flex-direction: column;
-  padding: var(--space-4);
-  gap: var(--space-3);
-  overflow-y: auto;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.closeButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 16px;
-  color: var(--color-text-muted);
+.composerSubmit {
+  align-self: flex-end;
 }
 
 .composer {
@@ -51,14 +23,23 @@
 
 .textarea {
   width: 100%;
+  min-height: 64px;
   resize: vertical;
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   color: var(--color-text);
-  background: var(--color-bg);
+  background: var(--color-surface);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-focus);
 }
 
 .mentionDropdown {
@@ -66,29 +47,34 @@
   left: 0;
   right: 0;
   top: 100%;
-  margin-top: 2px;
-  background: var(--color-bg);
+  margin-top: 4px;
+  background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
   z-index: 5;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: var(--space-1);
 }
 
 .mentionOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   background: none;
   border: none;
   text-align: left;
   padding: var(--space-2);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   cursor: pointer;
   color: var(--color-text);
 }
 
 .mentionOption:hover {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-inset);
 }
 
 .mentionChips {
@@ -101,20 +87,28 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-subtle);
-  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 560;
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-text);
 }
 
 .mentionChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  padding: 0;
+  color: inherit;
+  padding: 2px;
+  opacity: 0.7;
+}
+
+.mentionChipRemove:hover {
+  opacity: 1;
 }
 
 .list {
@@ -125,27 +119,34 @@
 
 .thread {
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
+.threadResolved {
+  background: var(--color-bg-inset);
+  opacity: 0.85;
+}
+
 .threadHeader {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .threadActions {
   display: flex;
   gap: var(--space-3);
+  padding-left: 34px;
 }
 
 .replies {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  margin-left: 15px;
   padding-left: var(--space-3);
   border-left: 2px solid var(--color-border);
 }
@@ -154,68 +155,77 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding-left: var(--space-3);
+  padding-left: 34px;
 }
 
 .commentBody {
   display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.commentMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 4px;
 }
 
 .commentMeta {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
   gap: var(--space-2);
 }
 
 .authorName {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .timestamp {
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
 .commentText {
-  font-size: 13px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   white-space: pre-wrap;
+  line-height: var(--leading-normal);
 }
 
 .rowActions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .linkButton {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 12px;
-  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 560;
+  color: var(--color-text-tertiary);
   padding: 0;
 }
 
-.badge {
-  display: inline-block;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-subtle);
-  color: var(--color-text-muted);
+.linkButton:hover {
+  color: var(--color-accent-text);
+}
+
+.linkButtonDanger:hover {
+  color: var(--color-danger);
 }
 
 .hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
 }
 
 .error {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--color-danger);
 }

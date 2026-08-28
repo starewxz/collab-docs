@@ -32,6 +32,15 @@ export class DocumentResponseDto {
   @ApiProperty({ nullable: true })
   publishedAt: Date | null;
 
+  @ApiProperty({ enum: ['view', 'edit'] })
+  publicAccessMode: 'view' | 'edit';
+
+  @ApiProperty({ nullable: true })
+  publicExpiresAt: Date | null;
+
+  @ApiProperty()
+  restricted: boolean;
+
   @ApiProperty()
   createdAt: Date;
 
@@ -50,6 +59,9 @@ export class DocumentResponseDto {
     dto.isPublished = document.isPublished;
     dto.publicSlug = document.publicSlug;
     dto.publishedAt = document.publishedAt;
+    dto.publicAccessMode = document.publicAccessMode;
+    dto.publicExpiresAt = document.publicExpiresAt;
+    dto.restricted = document.restricted;
     dto.createdAt = document.createdAt;
     dto.updatedAt = document.updatedAt;
     return dto;

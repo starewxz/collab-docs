@@ -1,29 +1,31 @@
+.loadingPage {
+  min-height: calc(100vh - var(--topbar-height));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .page {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: var(--space-8) var(--space-4);
+  padding: var(--space-10) var(--space-5) var(--space-16);
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-6);
 }
 
 .header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .title {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.roleBadge {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
 }
 
 .section {
@@ -32,31 +34,55 @@
   gap: var(--space-3);
 }
 
-.sectionTitle {
-  font-size: 15px;
-  font-weight: 600;
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.infoGrid dt {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: 4px;
+}
+
+.infoGrid dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 560;
+  color: var(--color-text);
+}
+
+.memberList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .memberRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3);
   gap: var(--space-3);
 }
 
 .memberInfo {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .memberName {
-  font-weight: 500;
+  font-weight: 560;
+  font-size: var(--text-sm);
 }
 
 .memberEmail {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
 }
 
 .memberControls {
@@ -66,31 +92,28 @@
   flex-shrink: 0;
 }
 
-.roleSelect {
-  font-size: 13px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
-  color: var(--color-text);
-}
-
 .inviteForm {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
 }
 
 .inviteForm input {
   flex: 1;
+  min-width: 200px;
 }
 
 .error {
   color: var(--color-danger);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-sm);
 }
 
 .hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-top: var(--space-2);
 }

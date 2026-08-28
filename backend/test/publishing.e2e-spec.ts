@@ -430,8 +430,11 @@ describe('Public Sharing (Stage 7, e2e)', () => {
         .get(`/api/public/documents/${slug}`)
         .expect(200);
 
+      // `mode` was added for TT gap 2 (public edit-by-link) - the frontend
+      // needs to know whether to render the read-only or editable view.
+      // Still no ids, no author info, nothing workspace-scoped.
       expect(Object.keys(publicRes.body as object).sort()).toEqual(
-        ['blocks', 'publishedAt', 'title'].sort(),
+        ['blocks', 'mode', 'publishedAt', 'title'].sort(),
       );
     });
   });

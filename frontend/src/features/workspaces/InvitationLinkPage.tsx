@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Card, Spinner } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { isApiError, isPlanLimitError } from "@/lib/api-error";
+import { formatPlanLimitMessage, isApiError, isPlanLimitError } from "@/lib/api-error";
 import { acceptInvitation, rejectInvitation } from "./api";
 import styles from "./InvitationLinkPage.module.css";
 
@@ -27,7 +27,7 @@ export function InvitationLinkPage({ token }: { token: string }) {
       // time (see backend InvitationsService.performAccept) - the invitee
       // isn't the one who can upgrade, so point them to the owner instead.
       if (isPlanLimitError(err)) {
-        setError(`${err.message} Ask the workspace owner to upgrade to PRO.`);
+        setError(formatPlanLimitMessage(err, "Ask the workspace owner to upgrade to PRO."));
       } else {
         setError(isApiError(err) ? err.message : "Failed to accept invitation.");
       }
@@ -60,6 +60,10 @@ export function InvitationLinkPage({ token }: { token: string }) {
   if (status === "unauthenticated") {
     return (
       <div className={styles.wrapper}>
+        <Link href="/" className={styles.brand} aria-label="Collab Docs home">
+          <span className={styles.brandMark} aria-hidden="true">C</span>
+          <span>Collab Docs</span>
+        </Link>
         <Card className={styles.card}>
           <h1 className={styles.title}>You&apos;ve been invited</h1>
           <p className={styles.message}>Log in or create an account to respond.</p>
@@ -78,6 +82,10 @@ export function InvitationLinkPage({ token }: { token: string }) {
 
   return (
     <div className={styles.wrapper}>
+      <Link href="/" className={styles.brand} aria-label="Collab Docs home">
+        <span className={styles.brandMark} aria-hidden="true">C</span>
+        <span>Collab Docs</span>
+      </Link>
       <Card className={styles.card}>
         <h1 className={styles.title}>You&apos;ve been invited to a workspace</h1>
         {message ? (
@@ -95,7 +103,11 @@ export function InvitationLinkPage({ token }: { token: string }) {
             </div>
           </>
         )}
-        {error ? <p className={styles.error}>{error}</p> : null}
+        {error ? (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        ) : null}
       </Card>
     </div>
   );

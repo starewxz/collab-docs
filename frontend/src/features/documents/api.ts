@@ -1,4 +1,4 @@
-import type { DocumentNode, DocumentPlacement } from "./types";
+import type { DocumentNode, DocumentPlacement, PublicAccessMode } from "./types";
 
 /** Every function here takes the caller's `apiFetch` (from useAuth()) so
  * this module stays a plain, testable API layer with no React dependency. */
@@ -79,15 +79,22 @@ export function restoreDocument(
   });
 }
 
+export interface PublishOptions {
+  slug?: string;
+  mode?: PublicAccessMode;
+  /** ISO timestamp - omit for a link that never expires. */
+  expiresAt?: string;
+}
+
 export function publishDocument(
   apiFetch: ApiFetch,
   workspaceId: string,
   documentId: string,
-  slug?: string,
+  options: PublishOptions = {},
 ): Promise<DocumentNode> {
   return apiFetch<DocumentNode>(`/api/workspaces/${workspaceId}/documents/${documentId}/publish`, {
     method: "POST",
-    body: JSON.stringify(slug ? { slug } : {}),
+    body: JSON.stringify(options),
   });
 }
 

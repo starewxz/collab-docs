@@ -22,6 +22,7 @@ describe('GlobalExceptionFilter', () => {
   beforeEach(() => {
     const configService = {
       app: { nodeEnv: 'production' },
+      isProductionLike: true,
     } as AppConfigService;
     filter = new GlobalExceptionFilter(configService);
 
@@ -78,6 +79,38 @@ describe('GlobalExceptionFilter', () => {
         message: 'Internal server error',
         error: 'Internal Server Error',
       }),
+    );
+  });
+
+  it('also hides internal error messages in staging (TT gap 8: staging is production-like)', () => {
+    const stagingFilter = new GlobalExceptionFilter({
+      app: { nodeEnv: 'staging' },
+      isProductionLike: true,
+    } as AppConfigService);
+
+    stagingFilter.catch(
+      new Error('secret db connection string'),
+      createHost(request, response),
+    );
+
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Internal server error' }),
+    );
+  });
+
+  it('shows the real error message outside production/staging', () => {
+    const devFilter = new GlobalExceptionFilter({
+      app: { nodeEnv: 'development' },
+      isProductionLike: false,
+    } as AppConfigService);
+
+    devFilter.catch(
+      new Error('secret db connection string'),
+      createHost(request, response),
+    );
+
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'secret db connection string' }),
     );
   });
 });

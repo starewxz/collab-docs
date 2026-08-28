@@ -116,7 +116,7 @@ export class AuthController {
   private setRefreshCookie(res: Response, pair: TokenPair): void {
     res.cookie(REFRESH_COOKIE_NAME, pair.rawRefreshToken, {
       httpOnly: true,
-      secure: this.config.app.nodeEnv === 'production',
+      secure: this.config.isProductionLike,
       sameSite: 'lax',
       path: REFRESH_COOKIE_PATH,
       domain: this.config.app.cookieDomain,

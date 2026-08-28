@@ -1,0 +1,75 @@
+.layout {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+}
+
+.menuButton {
+  display: none;
+}
+
+.backdrop {
+  display: none;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Below this width the sidebar becomes an off-canvas drawer instead of
+   crushing the editor - see Stage 9 responsive requirements. */
+@media (max-width: 768px) {
+  .menuButton {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    position: fixed;
+    top: var(--space-2);
+    left: var(--space-2);
+    z-index: 40;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: 560;
+    color: var(--color-text);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: var(--color-overlay);
+    z-index: 45;
+  }
+
+  .sidebarWrap {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 50;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
+    transition: transform var(--duration-slow) var(--ease-out);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .content {
+    padding-top: 52px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .sidebarWrap {
+    transition: none;
+  }
+}

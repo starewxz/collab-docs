@@ -1,8 +1,12 @@
 import * as Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
+  // 'staging' is production-like for security-sensitive behavior (secure
+  // cookies, hidden error detail, no dev-token exposure - see
+  // AppConfigService.isProductionLike) but a distinct deployable
+  // environment with its own database/domain/secrets.
   NODE_ENV: Joi.string()
-    .valid('development', 'production', 'test')
+    .valid('development', 'test', 'staging', 'production')
     .default('development'),
   PORT: Joi.number().default(4000),
   FRONTEND_URL: Joi.string().uri().required(),

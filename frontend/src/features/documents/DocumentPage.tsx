@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Button, EmptyState, Spinner } from "@/components/ui";
+import { Button, EmptyState, Spinner, useToast } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
 import { getWorkspace } from "@/features/workspaces/api";
@@ -25,6 +25,7 @@ export function DocumentPage({
 }) {
   const { status } = useRequireAuth();
   const { apiFetch } = useAuth();
+  const { showToast } = useToast();
   const router = useRouter();
 
   const [role, setRole] = useState<WorkspaceRole | null>(null);
@@ -34,6 +35,7 @@ export function DocumentPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
 
@@ -99,17 +101,21 @@ export function DocumentPage({
 
   async function handleRestore() {
     setActionError(null);
+    setRestoring(true);
     try {
       await restoreDocument(apiFetch, workspaceId, documentId);
       reload();
+      showToast("Document restored");
     } catch (err) {
       setActionError(isApiError(err) ? err.message : "Failed to restore document.");
+    } finally {
+      setRestoring(false);
     }
   }
 
   if (status === "loading" || (!document && !notFound && !loadError)) {
     return (
-      <div className={styles.page}>
+      <div className={styles.loadingPage}>
         <Spinner label="Loading document" />
       </div>
     );
@@ -117,7 +123,7 @@ export function DocumentPage({
 
   if (notFound) {
     return (
-      <div className={styles.page}>
+      <div className={styles.notFoundPage}>
         <EmptyState
           title="Document not found"
           description="It may have been deleted, or you may not have access to it."
@@ -131,8 +137,10 @@ export function DocumentPage({
 
   if (loadError || !document) {
     return (
-      <div className={styles.page}>
-        <p className={styles.error}>{loadError}</p>
+      <div className={styles.notFoundPage}>
+        <p className={styles.error} role="alert">
+          {loadError}
+        </p>
       </div>
     );
   }
@@ -148,30 +156,36 @@ export function DocumentPage({
               <Link href={`/workspace/${workspaceId}/document/${ancestor.id}`}>
                 {ancestor.title}
               </Link>
-              {" / "}
+              <span aria-hidden="true"> / </span>
             </span>
           ))}
-          {document.title}
+          <span className={styles.breadcrumbCurrent}>{document.title}</span>
         </div>
       ) : null}
 
       {document.archivedAt ? (
-        <div className={styles.archivedBanner}>
-          <span>This document is archived.</span>
+        <div className={styles.archivedBanner} role="status">
+          <span>This document is archived — it&apos;s read-only until restored.</span>
           {role !== null && canEditDocument(role) ? (
-            <Button variant="secondary" onClick={handleRestore}>
-              Restore
+            <Button variant="secondary" size="sm" onClick={handleRestore} disabled={restoring}>
+              {restoring ? "Restoring…" : "Restore"}
             </Button>
           ) : null}
         </div>
       ) : null}
 
-      {actionError ? <p className={styles.error}>{actionError}</p> : null}
+      {actionError ? (
+        <p className={styles.error} role="alert">
+          {actionError}
+        </p>
+      ) : null}
 
       <input
         className={styles.titleInput}
         value={titleDraft}
         disabled={!editable}
+        placeholder="Untitled"
+        aria-label="Document title"
         onChange={(e) => setTitleDraft(e.target.value)}
         onBlur={handleTitleCommit}
         onKeyDown={(e) => {
@@ -179,13 +193,15 @@ export function DocumentPage({
         }}
       />
 
-      <PublishControl
-        workspaceId={workspaceId}
-        documentId={documentId}
-        document={document}
-        editable={editable}
-        onChange={setDocument}
-      />
+      <div className={styles.metaRow}>
+        <PublishControl
+          workspaceId={workspaceId}
+          documentId={documentId}
+          document={document}
+          editable={editable}
+          onChange={setDocument}
+        />
+      </div>
 
       <div className={styles.editorArea}>
         <CollaborativeEditor workspaceId={workspaceId} documentId={documentId} />

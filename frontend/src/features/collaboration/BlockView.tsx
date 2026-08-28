@@ -2,6 +2,8 @@
 
 import { useCallback } from "react";
 import type * as Y from "yjs";
+import { IconButton, Input, Tooltip } from "@/components/ui";
+import { CloseIcon, ImageIcon } from "@/components/ui/icons";
 import styles from "./BlockView.module.css";
 import { useYjsObserve } from "./useYjsObserve";
 import { useYText } from "./useYText";
@@ -43,28 +45,46 @@ export function BlockView({
     return (
       <div className={styles.row}>
         <div className={styles.imageBlock}>
-          <p className={styles.imagePlaceholderHint}>
-            Image block (upload not implemented yet - metadata only)
-          </p>
-          <input
-            className={styles.imageInput}
-            placeholder="Image URL"
-            value={imageUrl}
-            readOnly={!canEdit}
-            onChange={(e) => canEdit && block.set("imageUrl", e.target.value)}
-          />
-          <input
-            className={styles.imageInput}
-            placeholder="Alt text"
-            value={imageAlt}
-            readOnly={!canEdit}
-            onChange={(e) => canEdit && block.set("imageAlt", e.target.value)}
-          />
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- external, unpredictable-domain image URLs; next/image would require configuring every collaborator's domain
+            <img className={styles.imagePreview} src={imageUrl} alt={imageAlt} />
+          ) : (
+            <div className={styles.imagePlaceholder}>
+              <ImageIcon width={20} height={20} />
+              <span>Paste an image URL below</span>
+            </div>
+          )}
+          <div className={styles.imageFields}>
+            <Input
+              className={styles.imageInput}
+              placeholder="Image URL"
+              value={imageUrl}
+              readOnly={!canEdit}
+              aria-label="Image URL"
+              onChange={(e) => canEdit && block.set("imageUrl", e.target.value)}
+            />
+            <Input
+              className={styles.imageInput}
+              placeholder="Alt text"
+              value={imageAlt}
+              readOnly={!canEdit}
+              aria-label="Image alt text"
+              onChange={(e) => canEdit && block.set("imageAlt", e.target.value)}
+            />
+          </div>
         </div>
         {canEdit ? (
-          <button type="button" className={styles.removeButton} onClick={onRemove}>
-            ✕
-          </button>
+          <Tooltip label="Remove block">
+            <IconButton
+              className={styles.removeButton}
+              variant="danger"
+              size="sm"
+              onClick={onRemove}
+              aria-label="Remove image block"
+            >
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
         ) : null}
       </div>
     );
@@ -78,7 +98,7 @@ export function BlockView({
         : styles.textarea;
 
   return (
-    <div className={styles.row}>
+    <div className={`${styles.row} ${type === "checkbox" && Boolean(block.get("checked")) ? styles.checked : ""}`}>
       {type === "bulletListItem" ? <span className={styles.bulletMarker}>•</span> : null}
       {type === "checkbox" ? (
         <input
@@ -86,6 +106,7 @@ export function BlockView({
           className={styles.checkbox}
           checked={Boolean(block.get("checked"))}
           disabled={!canEdit}
+          aria-label={text ? `Mark "${text}" as done` : "Mark item as done"}
           onChange={() => canEdit && block.set("checked", !block.get("checked"))}
         />
       ) : null}
@@ -95,13 +116,21 @@ export function BlockView({
         rows={1}
         value={text}
         readOnly={!canEdit}
-        placeholder={type === "heading" ? "Heading" : "Type something..."}
+        placeholder={type === "heading" ? "Heading" : "Type something…"}
+        aria-label={type === "heading" ? "Heading text" : undefined}
         onChange={handleTextChange}
       />
       {canEdit ? (
-        <button type="button" className={styles.removeButton} onClick={onRemove} title="Remove block">
-          ✕
-        </button>
+        <Tooltip label="Remove block">
+          <IconButton
+            className={styles.removeButton}
+            size="sm"
+            onClick={onRemove}
+            aria-label="Remove block"
+          >
+            <CloseIcon />
+          </IconButton>
+        </Tooltip>
       ) : null}
     </div>
   );

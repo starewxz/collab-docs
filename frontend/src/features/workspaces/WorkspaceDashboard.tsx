@@ -1,40 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Button, Card, EmptyState, Input, Spinner } from "@/components/ui";
+import { useActionState, useEffect, useState } from "react";
+import { Avatar, Badge, Button, Card, EmptyState, Input, Spinner } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
-import { isApiError, isPlanLimitError } from "@/lib/api-error";
-import {
-  acceptInvitationById,
-  createWorkspace,
-  listMyInvitations,
-  listWorkspaces,
-  rejectInvitationById,
-} from "./api";
+import { formatPlanLimitMessage, isApiError, isPlanLimitError } from "@/lib/api-error";
+import { acceptInvitationById, listMyInvitations, listWorkspaces, rejectInvitationById } from "./api";
+import { createWorkspaceAction, initialCreateWorkspaceActionState } from "./actions";
 import type { Invitation, Workspace } from "./types";
 import styles from "./WorkspaceDashboard.module.css";
 
 export function WorkspaceDashboard() {
   const { status } = useRequireAuth();
-  const router = useRouter();
 
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [invitations, setInvitations] = useState<Invitation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const { apiFetch } = useAuth();
+  const { apiFetch, getAccessToken } = useAuth();
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
+
+  // Server Action (TT gap 5) - see features/workspaces/actions.ts. On
+  // success it redirects server-side straight to the new workspace, so
+  // there's no client-side navigation branch to handle here at all.
+  const [createState, createFormAction, creating] = useActionState(
+    createWorkspaceAction.bind(null, getAccessToken() ?? ""),
+    initialCreateWorkspaceActionState,
+  );
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -55,25 +52,6 @@ export function WorkspaceDashboard() {
     };
   }, [status, apiFetch, reloadKey]);
 
-  async function handleCreate(event: React.FormEvent) {
-    event.preventDefault();
-    setCreateError(null);
-    if (!newWorkspaceName.trim()) {
-      setCreateError("Workspace name is required.");
-      return;
-    }
-    setCreating(true);
-    try {
-      const workspace = await createWorkspace(apiFetch, newWorkspaceName.trim());
-      setNewWorkspaceName("");
-      router.push(`/workspace/${workspace.id}`);
-    } catch (err) {
-      setCreateError(isApiError(err) ? err.message : "Failed to create workspace.");
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleAccept(invitation: Invitation) {
     setActionError(null);
     setActioningId(invitation.id);
@@ -85,7 +63,9 @@ export function WorkspaceDashboard() {
       // InvitationsService.performAccept) - the invitee isn't the one who
       // can upgrade, so point them to the owner instead.
       if (isPlanLimitError(err)) {
-        setActionError(`${err.message} Ask the workspace owner to upgrade to PRO.`);
+        setActionError(
+          formatPlanLimitMessage(err, "Ask the workspace owner to upgrade to PRO."),
+        );
       } else {
         setActionError(isApiError(err) ? err.message : "Failed to accept invitation.");
       }
@@ -109,83 +89,111 @@ export function WorkspaceDashboard() {
 
   if (status === "loading") {
     return (
-      <div className={styles.page}>
+      <div className={styles.loadingPage}>
         <Spinner label="Loading your session" />
       </div>
     );
   }
 
+  const pendingInvitations = invitations?.filter((i) => i.status === "pending") ?? [];
+
   return (
     <div className={styles.page}>
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>My Workspaces</h2>
-        {loadError ? <p className={styles.error}>{loadError}</p> : null}
+      <header className={styles.pageHeader}>
+        <h1 className={styles.pageTitle}>Workspaces</h1>
+        <p className={styles.pageSubtitle}>Pick up where you left off, or start something new.</p>
+      </header>
+
+      {pendingInvitations.length > 0 || invitations === null ? (
+        <section className={styles.section} aria-labelledby="invitations-heading">
+          <h2 id="invitations-heading" className={styles.sectionTitle}>
+            Pending invitations
+          </h2>
+          {actionError ? (
+            <p className={styles.error} role="alert">
+              {actionError}
+            </p>
+          ) : null}
+          {invitations === null ? (
+            <Spinner label="Loading invitations" />
+          ) : (
+            <div className={styles.invitationList}>
+              {pendingInvitations.map((invitation) => (
+                <Card key={invitation.id} padding="sm" className={styles.invitationRow}>
+                  <div className={styles.invitationInfo}>
+                    <Avatar name={invitation.workspaceName} size="sm" />
+                    <div>
+                      <div className={styles.workspaceName}>{invitation.workspaceName}</div>
+                      <Badge variant="outline">Invited as {invitation.role}</Badge>
+                    </div>
+                  </div>
+                  <div className={styles.invitationActions}>
+                    <Button
+                      size="sm"
+                      onClick={() => handleAccept(invitation)}
+                      disabled={actioningId === invitation.id}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleReject(invitation)}
+                      disabled={actioningId === invitation.id}
+                    >
+                      Decline
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <section className={styles.section} aria-labelledby="workspaces-heading">
+        <h2 id="workspaces-heading" className={styles.sectionTitle}>
+          Your workspaces
+        </h2>
+        {loadError ? (
+          <p className={styles.error} role="alert">
+            {loadError}
+          </p>
+        ) : null}
         {workspaces === null ? (
           <Spinner label="Loading workspaces" />
         ) : workspaces.length === 0 ? (
-          <EmptyState title="No workspaces yet" description="Create one below to get started." />
+          <EmptyState
+            title="No workspaces yet"
+            description="Create your first workspace below — you'll be its owner and can invite others once it exists."
+          />
         ) : (
-          <div className={styles.workspaceList}>
+          <div className={styles.workspaceGrid}>
             {workspaces.map((workspace) => (
-              <Card key={workspace.id} className={styles.workspaceRow}>
-                <div>
-                  <Link href={`/workspace/${workspace.id}`} className={styles.workspaceName}>
-                    {workspace.name}
-                  </Link>
-                  <div className={styles.workspaceRole}>{workspace.role}</div>
-                </div>
-              </Card>
+              <Link key={workspace.id} href={`/workspace/${workspace.id}`} className={styles.workspaceCard}>
+                <Card interactive className={styles.workspaceCardInner}>
+                  <Avatar name={workspace.name} />
+                  <div className={styles.workspaceCardBody}>
+                    <div className={styles.workspaceName}>{workspace.name}</div>
+                    <Badge variant="neutral">{workspace.role}</Badge>
+                  </div>
+                </Card>
+              </Link>
             ))}
           </div>
         )}
 
-        <form className={styles.createForm} onSubmit={handleCreate}>
-          <Input
-            placeholder="New workspace name"
-            value={newWorkspaceName}
-            onChange={(e) => setNewWorkspaceName(e.target.value)}
-          />
+        <form className={styles.createForm} action={createFormAction}>
+          <Input name="name" aria-label="New workspace name" placeholder="New workspace name" />
           <Button type="submit" disabled={creating}>
-            {creating ? "Creating…" : "Create Workspace"}
+            {creating ? "Creating…" : "Create workspace"}
           </Button>
         </form>
-        {createError ? <p className={styles.error}>{createError}</p> : null}
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Pending Invitations</h2>
-        {actionError ? <p className={styles.error}>{actionError}</p> : null}
-        {invitations === null ? (
-          <Spinner label="Loading invitations" />
-        ) : invitations.filter((i) => i.status === "pending").length === 0 ? (
-          <EmptyState title="No pending invitations" />
-        ) : (
-          invitations
-            .filter((i) => i.status === "pending")
-            .map((invitation) => (
-              <Card key={invitation.id} className={styles.invitationRow}>
-                <div className={styles.invitationInfo}>
-                  <span className={styles.workspaceName}>{invitation.workspaceName}</span>
-                  <span className={styles.workspaceRole}>as {invitation.role}</span>
-                </div>
-                <div className={styles.invitationActions}>
-                  <Button
-                    onClick={() => handleAccept(invitation)}
-                    disabled={actioningId === invitation.id}
-                  >
-                    Accept
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => handleReject(invitation)}
-                    disabled={actioningId === invitation.id}
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </Card>
-            ))
-        )}
+        {createState.status === "error" ? (
+          <p className={styles.error} role="alert">
+            {createState.message}
+          </p>
+        ) : null}
       </section>
     </div>
   );

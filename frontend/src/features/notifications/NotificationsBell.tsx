@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { EmptyState, IconButton } from "@/components/ui";
+import { BellIcon } from "@/components/ui/icons";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { isApiError } from "@/lib/api-error";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -27,10 +31,26 @@ function formatTimestamp(iso: string): string {
 
 export function NotificationsBell() {
   const { apiFetch, status } = useAuth();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[] | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(dropdownRef, () => setOpen(false));
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -70,22 +90,16 @@ export function NotificationsBell() {
     };
   }, [apiFetch, open]);
 
-  async function handleMarkRead(notification: NotificationItem) {
+  /** Marking read is best-effort and never blocks navigation - a failed
+   * mark-read just means the next poll reconciles the true unread state,
+   * but the user's actual goal (go see what happened) still succeeds. */
+  function handleOpenNotification(notification: NotificationItem) {
+    setOpen(false);
+    router.push(`/workspace/${notification.workspaceId}/document/${notification.documentId}`);
     if (notification.readAt) return;
-    try {
-      await markNotificationRead(apiFetch, notification.id);
-      setNotifications((prev) =>
-        prev
-          ? prev.map((n) =>
-              n.id === notification.id ? { ...n, readAt: new Date().toISOString() } : n,
-            )
-          : prev,
-      );
-      setUnreadCount((c) => Math.max(0, c - 1));
-    } catch {
-      // Non-critical UX action - silently ignore and let the next poll
-      // reconcile the true unread state.
-    }
+    markNotificationRead(apiFetch, notification.id)
+      .then(() => setUnreadCount((c) => Math.max(0, c - 1)))
+      .catch(() => undefined);
   }
 
   async function handleMarkAllRead() {
@@ -103,32 +117,49 @@ export function NotificationsBell() {
   if (status !== "authenticated") return null;
 
   return (
-    <div className={styles.wrapper}>
-      <button
-        type="button"
-        className={styles.bellButton}
+    <div className={styles.wrapper} ref={wrapperRef}>
+      <IconButton
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        active={open}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Notifications"
       >
-        🔔
-        {unreadCount > 0 ? <span className={styles.badge}>{unreadCount}</span> : null}
-      </button>
+        <BellIcon />
+        {unreadCount > 0 ? (
+          <span className={styles.badge}>{unreadCount > 9 ? "9+" : unreadCount}</span>
+        ) : null}
+      </IconButton>
 
       {open ? (
-        <div className={styles.dropdown}>
+        <div
+          ref={dropdownRef}
+          className={styles.dropdown}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Notifications"
+          tabIndex={-1}
+        >
           <div className={styles.header}>
             <span className={styles.title}>Notifications</span>
-            <button type="button" className={styles.linkButton} onClick={handleMarkAllRead}>
-              Mark all read
-            </button>
+            {notifications && notifications.length > 0 ? (
+              <button type="button" className={styles.linkButton} onClick={handleMarkAllRead}>
+                Mark all read
+              </button>
+            ) : null}
           </div>
 
           {notifications === null ? (
             <p className={styles.hint}>Loading…</p>
           ) : error ? (
-            <p className={styles.error}>{error}</p>
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
           ) : notifications.length === 0 ? (
-            <p className={styles.hint}>You&apos;re all caught up.</p>
+            <EmptyState
+              icon={<BellIcon width={20} height={20} />}
+              title="You're all caught up"
+              description="New mentions, replies, and thread updates will show up here."
+              compact
+            />
           ) : (
             <div className={styles.list}>
               {notifications.map((notification) => (
@@ -136,7 +167,8 @@ export function NotificationsBell() {
                   key={notification.id}
                   type="button"
                   className={`${styles.item} ${notification.readAt ? "" : styles.itemUnread}`}
-                  onClick={() => handleMarkRead(notification)}
+                  onClick={() => handleOpenNotification(notification)}
+                  aria-label={`${TYPE_LABEL[notification.type]}, open document`}
                 >
                   <span className={styles.itemText}>{TYPE_LABEL[notification.type]}</span>
                   <span className={styles.itemMeta}>{formatTimestamp(notification.createdAt)}</span>

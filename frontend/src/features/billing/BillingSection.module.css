@@ -1,80 +1,80 @@
-.section {
+.card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-}
-
-.sectionTitle {
-  font-size: 15px;
-  font-weight: 600;
+  gap: var(--space-5);
 }
 
 .planRow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 
-.planBadge {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-}
-
 .statusText {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   text-transform: capitalize;
 }
 
 .periodText {
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
 }
 
 .usageList {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .usageRow {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .usageLabel {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--text-sm);
+  font-weight: 560;
 }
 
 .usageValue {
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
+  font-weight: 500;
 }
 
 .usageBar {
   height: 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-subtle);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-inset);
   overflow: hidden;
 }
 
 .usageBarFill {
   height: 100%;
   background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.usageBarFillWarning {
+  background: var(--color-warning);
 }
 
 .actions {
   display: flex;
   gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
 }
 
 .error {
   color: var(--color-danger);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-sm);
 }

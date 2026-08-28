@@ -1,3 +1,5 @@
+export type PublicAccessMode = "view" | "edit";
+
 export interface DocumentNode {
   id: string;
   workspaceId: string;
@@ -9,6 +11,9 @@ export interface DocumentNode {
   isPublished: boolean;
   publicSlug: string | null;
   publishedAt: string | null;
+  publicAccessMode: PublicAccessMode;
+  publicExpiresAt: string | null;
+  restricted: boolean;
   createdAt: string;
   updatedAt: string;
 }

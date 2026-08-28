@@ -59,15 +59,23 @@ Policy: workspace-scoped routes return **404** for non-members, **403** for memb
 | POST `/:documentId/move` | any non-VIEWER | `{parentId, referenceId?, placement?}`; `parentId: null` = workspace root; rejects self-parent, cycles, cross-workspace parents, archived documents/targets (400) |
 | DELETE `/:documentId` | any non-VIEWER | archives the **entire subtree**, 204; also clears `isPublished`/`publishedAt` for any published documents in that subtree (Stage 7) and triggers frontend revalidation for their slugs |
 | POST `/:documentId/restore` | any non-VIEWER | restores the **entire subtree**; reparents to root if the original parent is still archived/gone |
-| POST `/:documentId/publish` | any non-VIEWER | `{slug?}` (Stage 7); 400 if archived; normalizes/collision-retries the slug (same pattern as workspace slugs); idempotent-on-republish (keeps the current slug unless a new one is requested); triggers frontend revalidation for old+new slugs if the slug changed |
-| POST `/:documentId/unpublish` | any non-VIEWER | idempotent no-op if already unpublished; triggers frontend revalidation for the (now-invalid) slug |
-| GET `/search` | any member | `?q=&limit=&offset=` (Stage 8); registered before `:documentId` so it isn't matched as a document id; workspace-scoped + `archivedAt IS NULL`; `websearch_to_tsquery` full-text match over title+content, `ts_rank`-ordered, `ts_headline` snippet; returns `DocumentSearchResultDto[]` (`{id, title, snippet, parentId, updatedAt}`), max `limit` 50 |
+| POST `/:documentId/publish` | any non-VIEWER | `{slug?, mode?: 'view'\|'edit', expiresAt?}` (Stage 7; `mode`/`expiresAt` added post-Stage-10 — see ADR-023); 400 if archived; normalizes/collision-retries the slug; idempotent-on-republish; triggers frontend revalidation for old+new slugs if the slug changed |
+| POST `/:documentId/unpublish` | any non-VIEWER | idempotent no-op if already unpublished; resets `publicAccessMode`/`publicExpiresAt` to defaults; triggers frontend revalidation for the (now-invalid) slug |
+| GET `/search` | any member | `?q=&limit=&offset=` (Stage 8); registered before `:documentId` so it isn't matched as a document id; workspace-scoped + `archivedAt IS NULL`; `websearch_to_tsquery` full-text match over title+content, `ts_rank`-ordered, `ts_headline` snippet; returns `DocumentSearchResultDto[]` (`{id, title, snippet, parentId, updatedAt}`), max `limit` 50; results are also filtered through `DocumentPermissionsService.filterVisible` so a restricted document's snippet never leaks (see below) |
+| GET `/:documentId/collaborators` | any member with document access | lists `DocumentCollaborator` rows (`{id, userId, accessLevel, createdAt}`) for this document |
+| POST `/:documentId/collaborators` | OWNER/ADMIN (`assertCanManageDocumentAccess`) | `{userId, accessLevel: 'VIEWER'\|'EDITOR'}`; upserts — re-sharing at a new level is one call; 400 if `userId` isn't a workspace member |
+| DELETE `/:documentId/collaborators/:userId` | OWNER/ADMIN | 204, idempotent |
+| PATCH `/:documentId/access` | OWNER/ADMIN | `{restricted: boolean}` — toggles document-level ACL (see below) |
+
+### Document-level ACL (post-Stage-10 — see ADR-022, `DocumentPermissionsService`)
+
+A document's `restricted` flag (default `false`) plus per-user `DocumentCollaborator` rows (`VIEWER`/`EDITOR`) layer on top of the workspace role for `getOne`/`update`/`move`/archive/restore/publish/unpublish and `list`/`search` filtering. OWNER/ADMIN always pass. With no override: `restricted=false` behaves exactly as before (any member views, non-VIEWER edits); `restricted=true` denies everyone without an explicit `DocumentCollaborator` row. A row can extend access (e.g. a VIEWER-level share lets a workspace VIEWER read a restricted doc) or narrow it (a VIEWER-level share caps a workspace EDITOR to read-only on that one document). Enforced identically over REST (`DocumentsController`, re-fetching the document and calling `documentPermissions.assertCanView/assertCanEdit`) and over the `/collab` gateway's `join` handler (`resolveAccess`) — see the Collaboration section below.
 
 ## Public documents (`public-documents.controller.ts`, base `/public/documents` — Stage 7, **no auth guards at all**)
 
 | Method & Path | Notes |
 |---|---|
-| GET `/:slug` | 404 unless a document exists with this exact `publicSlug` AND `isPublished=true` AND not archived; response is `{title, blocks, publishedAt}` only — no workspace/document/user ids, no comments/attachments/version data; content is read from the durable Yjs buffer (`CollaborationPersistenceService.hydrate`), never a live collaboration session |
+| GET `/:slug` | 404 unless a document exists with this exact `publicSlug` AND `isPublished=true` AND not archived AND (`publicExpiresAt` is null or in the future — ADR-023); response is `{title, blocks, publishedAt, mode: 'view'\|'edit'}` only — no workspace/document/user ids, no comments/attachments/version data; content is read from the durable Yjs buffer (`CollaborationPersistenceService.hydrate`), never a live collaboration session |
 
 ## Document versions (`versions.controller.ts`, base `/workspaces/:workspaceId/documents/:documentId/versions`)
 
@@ -93,7 +101,7 @@ Policy: workspace-scoped routes return **404** for non-members, **403** for memb
 
 | Method & Path | Notes |
 |---|---|
-| GET `/` | `?unreadOnly=true` filters; newest first, capped at 100 |
+| GET `/` | `?unreadOnly=true` filters; newest first, capped at 100; each item includes `workspaceId` (Stage 9 - joined from `documents` at read time, not stored on `Notification`) so the frontend can deep-link to `/workspace/:workspaceId/document/:documentId` |
 | GET `/unread-count` | `{count}` |
 | POST `/:id/read` | 204, scoped by `(id, userId)` together — IDOR-safe |
 | POST `/read-all` | 204 |
@@ -128,8 +136,9 @@ Policy: workspace-scoped routes return **404** for non-members, **403** for memb
 | Direction | Event | Notes |
 |---|---|---|
 | connect | handshake `auth: {token}` | JWT verified the same way as `JwtAuthGuard`; invalid/missing → disconnect |
-| client → server | `join` `{workspaceId, documentId}` | workspace membership + document existence (workspace-scoped) + `canEditDocument` checked before anything else; failure → `join-error` + disconnect |
-| server → client | `joined` `{documentId, canEdit, role, self}` | ack; `canEdit=false` for VIEWER or an archived document |
+| client → server | `join` `{workspaceId, documentId}` | workspace membership + document existence (workspace-scoped) + `DocumentPermissionsService.resolveAccess` (workspace role + document-level ACL — ADR-022) checked before anything else; failure → `join-error` + disconnect |
+| client → server | `join-public` `{slug}` (no handshake token required — ADR-023) | anonymous, slug-scoped join for a document published with `publicAccessMode: 'edit'`; admits only if published, not archived, and not expired (same check as the public REST read); the resulting session can only ever touch that one document |
+| server → client | `joined` `{documentId, canEdit, role, self}` | ack; `role: null` for an anonymous `join-public` session; `canEdit=false` for VIEWER, a restricted document with no/view-only override, or an archived document |
 | server → client | `sync-update` (binary) | full Y.Doc state on join; a relayed edit thereafter |
 | client → server | `sync-update` (binary) | a Yjs update; rejected (`update-rejected`, not applied/relayed) if `!canEdit` |
 | either direction | `awareness-update` (binary) | `y-protocols/awareness` presence (cursor, user); relayed to the whole `document:<id>` room |
@@ -141,5 +150,5 @@ Policy: workspace-scoped routes return **404** for non-members, **403** for memb
 |---|---|
 | GET `/health` | Terminus: postgres/redis/minio, 503 if any down |
 | GET `/health/live` | liveness only, no dependency checks |
-| GET `/metrics` | Prometheus exposition (`http_requests_total`, `http_request_duration_seconds`, `auth_login_total{result}`, `workspaces_created_total`, `workspace_invitations_total{status}`, `documents_created_total`, `documents_archived_total`, `document_operations_total{operation}`, `collab_connections_current`, `collab_sessions_current`, `crdt_updates_total`, `collab_connection_errors_total{reason}`, `collab_persist_total{result}`, `collab_versions_created_total{kind}`, `collab_version_restore_total{result}`, `collab_session_hydrated_total`, `collab_session_evicted_total`, `comments_created_total{kind}`, `comment_threads_resolved_total{action}`, `notifications_processed_total{result}`, `notification_processing_failures_total`, `attachment_uploads_total{result}`, `documents_published_total`, `documents_unpublished_total`, `public_render_failures_total`, `public_revalidation_failures_total`, `search_requests_total`, `search_failures_total`, `plan_limit_rejections_total{limit}`, `subscription_state_changes_total{result}`, `billing_webhook_failures_total` — Stage 8, no workspace/user/document ids as labels) |
+| GET `/metrics` | Prometheus exposition (`http_requests_total`, `http_request_duration_seconds`, `auth_login_total{result}`, `workspaces_created_total`, `workspace_invitations_total{status}`, `documents_created_total`, `documents_archived_total`, `document_operations_total{operation}`, `collab_connections_current`, `collab_sessions_current`, `crdt_updates_total`, `collab_connection_errors_total{reason}`, `collab_persist_total{result}`, `collab_versions_created_total{kind}`, `collab_version_restore_total{result}`, `collab_session_hydrated_total`, `collab_session_evicted_total`, `comments_created_total{kind}`, `comment_threads_resolved_total{action}`, `notifications_processed_total{result}`, `notification_processing_failures_total`, `attachment_uploads_total{result}`, `documents_published_total`, `documents_unpublished_total`, `public_render_failures_total`, `public_revalidation_failures_total`, `search_requests_total`, `search_failures_total`, `plan_limit_rejections_total{limit}`, `subscription_state_changes_total{result}`, `billing_webhook_failures_total` — Stage 8, no workspace/user/document ids as labels; `search_index_jobs_total{result}` and `document_tree_cache_total{result}` added post-Stage-10 — see ADR-024/025) |
 | GET `/docs` | Swagger UI |

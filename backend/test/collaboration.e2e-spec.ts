@@ -39,7 +39,7 @@ interface InvitationBody {
 interface JoinedPayload {
   documentId: string;
   canEdit: boolean;
-  role: string;
+  role: string | null;
   self: { id: string; name: string };
 }
 
@@ -124,6 +124,18 @@ describe('Collaboration (e2e)', () => {
     return socket;
   }
 
+  /** No `auth.token` at all - the anonymous connection a public edit-by-link
+   * visitor makes (see `handleConnection`'s "missing token" branch). */
+  function connectAnonymous(): Socket {
+    const socket = io(collabUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      forceNew: true,
+    });
+    sockets.push(socket);
+    return socket;
+  }
+
   async function register(
     email: string,
     firstName: string,
@@ -190,6 +202,277 @@ describe('Collaboration (e2e)', () => {
     socket.emit('join', { workspaceId, documentId });
     return joined;
   }
+
+  async function joinPublic(
+    socket: Socket,
+    slug: string,
+  ): Promise<JoinedPayload> {
+    const joined = waitForEvent<JoinedPayload>(socket, 'joined');
+    socket.emit('join-public', { slug });
+    return joined;
+  }
+
+  async function restrictDocument(
+    ownerToken: string,
+    workspaceId: string,
+    documentId: string,
+  ): Promise<void> {
+    await request(baseUrl)
+      .patch(`/api/workspaces/${workspaceId}/documents/${documentId}/access`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ restricted: true })
+      .expect(200);
+  }
+
+  async function shareDocument(
+    ownerToken: string,
+    workspaceId: string,
+    documentId: string,
+    userId: string,
+    accessLevel: 'VIEWER' | 'EDITOR',
+  ): Promise<void> {
+    await request(baseUrl)
+      .post(
+        `/api/workspaces/${workspaceId}/documents/${documentId}/collaborators`,
+      )
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ userId, accessLevel })
+      .expect(201);
+  }
+
+  interface PublishBody {
+    publicSlug: string;
+  }
+
+  async function publishDocument(
+    token: string,
+    workspaceId: string,
+    documentId: string,
+    body: { mode?: 'view' | 'edit'; expiresAt?: string } = {},
+  ): Promise<string> {
+    const res = await request(baseUrl)
+      .post(`/api/workspaces/${workspaceId}/documents/${documentId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body)
+      .expect(201);
+    return (res.body as PublishBody).publicSlug;
+  }
+
+  describe('Document-level ACL over the gateway (TT gap 1)', () => {
+    it('a restricted document rejects join for a non-shared workspace EDITOR, then admits them once shared', async () => {
+      const owner = await register(emailFor('gw-acl-owner'), 'Owner');
+      const editorEmail = emailFor('gw-acl-editor');
+      const editor = await register(editorEmail, 'Editor');
+      const workspaceId = await createWorkspace(owner.accessToken, 'GW ACL WS');
+      const inviteToken = await invite(
+        owner.accessToken,
+        workspaceId,
+        editorEmail,
+        'EDITOR',
+      );
+      await acceptInvite(editor.accessToken, inviteToken);
+      const documentId = await createDocument(
+        owner.accessToken,
+        workspaceId,
+        'GW ACL Doc',
+      );
+      await restrictDocument(owner.accessToken, workspaceId, documentId);
+
+      const editorSocket = connect(editor.accessToken);
+      const disconnected = waitForDisconnect(editorSocket);
+      const joinError = waitForEvent(editorSocket, 'join-error');
+      editorSocket.emit('join', { workspaceId, documentId });
+      await Promise.all([disconnected, joinError]);
+
+      await shareDocument(
+        owner.accessToken,
+        workspaceId,
+        documentId,
+        editor.user.id,
+        'VIEWER',
+      );
+
+      const reconnected = connect(editor.accessToken);
+      const joined = await join(reconnected, workspaceId, documentId);
+      expect(joined.canEdit).toBe(false);
+
+      // A read-only join must not let the client publish edits either.
+      const rejected = waitForEvent(reconnected, 'update-rejected');
+      const scratch = new Y.Doc();
+      scratch.getText('content').insert(0, 'nope');
+      reconnected.emit(
+        'sync-update',
+        Buffer.from(Y.encodeStateAsUpdate(scratch)),
+      );
+      await rejected;
+      scratch.destroy();
+    });
+  });
+
+  describe('Async search indexing (TT gap 6)', () => {
+    it('a collaborative edit becomes searchable only after the async index job runs, not synchronously', async () => {
+      const owner = await register(emailFor('async-search-owner'), 'Owner');
+      const workspaceId = await createWorkspace(
+        owner.accessToken,
+        'Async Search WS',
+      );
+      const documentId = await createDocument(
+        owner.accessToken,
+        workspaceId,
+        'Async Search Doc',
+      );
+
+      const socket = connect(owner.accessToken);
+      await join(socket, workspaceId, documentId);
+
+      // The search indexer decodes the `blocks` Y.Array model (see
+      // yjs-document.util.ts), not a bare `getText('content')` - unlike
+      // this file's other tests, which only exercise raw CRDT byte
+      // relaying and don't care about block shape.
+      const writerDoc = new Y.Doc();
+      const block = new Y.Map<unknown>();
+      block.set('id', 'b1');
+      block.set('type', 'paragraph');
+      const ytext = new Y.Text();
+      ytext.insert(0, 'zzasyncindexedneedle');
+      block.set('text', ytext);
+      writerDoc.getArray('blocks').insert(0, [block]);
+      socket.emit('sync-update', Buffer.from(Y.encodeStateAsUpdate(writerDoc)));
+
+      // Right after the edit, the flush (and therefore the enqueue) hasn't
+      // happened yet - COLLAB_PERSIST_INTERVAL_MS is 200ms in the test env
+      // (see test/.env.test), so a search immediately afterwards must not
+      // find it yet. This is the behavior that distinguishes "async via
+      // queue" from "synchronous in the request".
+      const immediate = await request(baseUrl)
+        .get(`/api/workspaces/${workspaceId}/documents/search`)
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .query({ q: 'zzasyncindexedneedle' })
+        .expect(200);
+      expect((immediate.body as { id: string }[]).length).toBe(0);
+
+      // After the flush interval elapses (enqueuing the job) and the
+      // in-process worker has had time to run it, the document is
+      // searchable - proving the content reached the index via the queue,
+      // not the original request.
+      let found = false;
+      for (let attempt = 0; attempt < 20 && !found; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const res = await request(baseUrl)
+          .get(`/api/workspaces/${workspaceId}/documents/search`)
+          .set('Authorization', `Bearer ${owner.accessToken}`)
+          .query({ q: 'zzasyncindexedneedle' })
+          .expect(200);
+        found = (res.body as { id: string }[]).some((d) => d.id === documentId);
+      }
+      expect(found).toBe(true);
+    }, 15000);
+  });
+
+  describe('Public edit-by-link (TT gap 2)', () => {
+    // One owner/workspace shared across this block's tests (each creates
+    // its own document) - keeps registration calls down so this suite
+    // doesn't trip the register-endpoint rate limiter alongside every
+    // other describe block in this file that also registers users.
+    let sharedOwner: AuthResponseBody;
+    let sharedWorkspaceId: string;
+
+    beforeAll(async () => {
+      sharedOwner = await register(emailFor('pub-link-owner'), 'Owner');
+      sharedWorkspaceId = await createWorkspace(
+        sharedOwner.accessToken,
+        'Public Link WS',
+      );
+    });
+
+    it('an anonymous visitor can join and edit a document published in edit mode, scoped to that document only', async () => {
+      const owner = sharedOwner;
+      const workspaceId = sharedWorkspaceId;
+      const documentId = await createDocument(
+        owner.accessToken,
+        workspaceId,
+        'Public Edit Doc',
+      );
+      const slug = await publishDocument(
+        owner.accessToken,
+        workspaceId,
+        documentId,
+        {
+          mode: 'edit',
+        },
+      );
+
+      const ownerSocket = connect(owner.accessToken);
+      const ownerDoc = new Y.Doc();
+      ownerSocket.on('sync-update', (update: ArrayBuffer) =>
+        Y.applyUpdate(ownerDoc, new Uint8Array(update)),
+      );
+      await join(ownerSocket, workspaceId, documentId);
+
+      const publicSocket = connectAnonymous();
+      const publicJoined = await joinPublic(publicSocket, slug);
+      expect(publicJoined.canEdit).toBe(true);
+      expect(publicJoined.role).toBeNull();
+
+      const publicDoc = new Y.Doc();
+      publicDoc.getText('content').insert(0, 'edited by the public');
+      const relayed = waitForEvent(ownerSocket, 'sync-update');
+      publicSocket.emit(
+        'sync-update',
+        Buffer.from(Y.encodeStateAsUpdate(publicDoc)),
+      );
+      await relayed;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(textContent(ownerDoc)).toBe('edited by the public');
+      publicDoc.destroy();
+    });
+
+    it('a view-only public link does not accept join-public as an editor', async () => {
+      const documentId = await createDocument(
+        sharedOwner.accessToken,
+        sharedWorkspaceId,
+        'Public View Doc',
+      );
+      const slug = await publishDocument(
+        sharedOwner.accessToken,
+        sharedWorkspaceId,
+        documentId,
+      );
+
+      const publicSocket = connectAnonymous();
+      const disconnected = waitForDisconnect(publicSocket);
+      const joinError = waitForEvent(publicSocket, 'join-error');
+      publicSocket.emit('join-public', { slug });
+      await Promise.all([disconnected, joinError]);
+    });
+
+    it('an expired edit link is rejected the same as an unpublished one', async () => {
+      const documentId = await createDocument(
+        sharedOwner.accessToken,
+        sharedWorkspaceId,
+        'Public Expired Doc',
+      );
+      const past = new Date(Date.now() - 60_000).toISOString();
+      const slug = await publishDocument(
+        sharedOwner.accessToken,
+        sharedWorkspaceId,
+        documentId,
+        {
+          mode: 'edit',
+          expiresAt: past,
+        },
+      );
+
+      await request(baseUrl).get(`/api/public/documents/${slug}`).expect(404);
+
+      const publicSocket = connectAnonymous();
+      const disconnected = waitForDisconnect(publicSocket);
+      const joinError = waitForEvent(publicSocket, 'join-error');
+      publicSocket.emit('join-public', { slug });
+      await Promise.all([disconnected, joinError]);
+    });
+  });
 
   describe('Concurrent edit convergence (the most important test)', () => {
     it('two clients editing concurrently converge to the same state with both edits surviving', async () => {

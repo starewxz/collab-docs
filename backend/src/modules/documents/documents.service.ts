@@ -1,13 +1,16 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import type { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { RevalidationService } from '../../common/revalidation/revalidation.service';
+import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { slugify, slugSuffix } from '../workspaces/slug.util';
 import { CreateDocumentDto } from './dto/create-document.dto';
@@ -31,6 +34,11 @@ const UNIQUE_VIOLATION = '23505';
  * more than enough for meaningful search matching at this project's scale. */
 const MAX_CONTENT_TEXT_LENGTH = 20_000;
 
+/** Safety-net TTL for the workspace document-tree cache - explicit
+ * invalidation (see `invalidateTree`) is the primary mechanism, this just
+ * bounds staleness if an invalidation call is ever missed. */
+const TREE_CACHE_TTL_SECONDS = 60;
+
 function parentClause(parentId: string | null) {
   return parentId === null ? IsNull() : parentId;
 }
@@ -45,6 +53,7 @@ export class DocumentsService {
     private readonly metrics: MetricsService,
     private readonly revalidation: RevalidationService,
     private readonly entitlements: EntitlementsService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     this.logger.setContext(DocumentsService.name);
   }
@@ -58,7 +67,7 @@ export class DocumentsService {
     createdById: string,
     dto: CreateDocumentDto,
   ): Promise<DocumentResponseDto> {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       await this.entitlements.lockWorkspace(manager, workspaceId);
       await this.entitlements.assertCanCreateDocument(manager, workspaceId);
 
@@ -103,19 +112,105 @@ export class DocumentsService {
 
       return DocumentResponseDto.fromEntity(document);
     });
+    await this.invalidateTree(workspaceId);
+    return result;
   }
 
+  /**
+   * The workspace document tree (TT gap 7: Redis read caching). Always
+   * caches the full (including-archived) set under one key per workspace
+   * - the `includeArchived=false` view most callers actually want is just
+   * an in-memory filter of that, so both call shapes share one cache
+   * entry/invalidation path instead of two.
+   *
+   * Deliberately caches structure only, before any per-user permission
+   * filtering (`DocumentPermissionsService.filterVisible`, applied by the
+   * controller on every request regardless of cache hit/miss) - so a
+   * cached response can never leak a document a given caller shouldn't
+   * see. See `08-decisions.md` for why permission filtering must never be
+   * baked into a shared cache entry.
+   */
   async list(
     workspaceId: string,
     includeArchived: boolean,
   ): Promise<DocumentResponseDto[]> {
+    const all = await this.getCachedTree(workspaceId);
+    return includeArchived ? all : all.filter((d) => !d.archivedAt);
+  }
+
+  private treeCacheKey(workspaceId: string): string {
+    return `doc-tree:${workspaceId}`;
+  }
+
+  private async getCachedTree(
+    workspaceId: string,
+  ): Promise<DocumentResponseDto[]> {
+    try {
+      const cached = await this.redis.get(this.treeCacheKey(workspaceId));
+      if (cached) {
+        this.metrics.documentTreeCacheTotal.inc({ result: 'hit' });
+        return JSON.parse(cached) as DocumentResponseDto[];
+      }
+    } catch (err) {
+      // Redis being unavailable degrades to "always query Postgres", never
+      // a broken tree - the same fail-open posture as the rest of this
+      // service's non-critical side effects (revalidation, search index).
+      this.logger.warn(
+        {
+          event: 'document_tree_cache_read_failed',
+          workspaceId,
+          error: (err as Error).message,
+        },
+        'document_tree_cache_read_failed',
+      );
+    }
+
+    this.metrics.documentTreeCacheTotal.inc({ result: 'miss' });
     const documents = await this.documents.find({
-      where: includeArchived
-        ? { workspaceId }
-        : { workspaceId, archivedAt: IsNull() },
+      where: { workspaceId },
       order: { position: 'ASC' },
     });
-    return documents.map((d) => DocumentResponseDto.fromEntity(d));
+    const dtos = documents.map((d) => DocumentResponseDto.fromEntity(d));
+
+    try {
+      await this.redis.set(
+        this.treeCacheKey(workspaceId),
+        JSON.stringify(dtos),
+        'EX',
+        TREE_CACHE_TTL_SECONDS,
+      );
+    } catch (err) {
+      this.logger.warn(
+        {
+          event: 'document_tree_cache_write_failed',
+          workspaceId,
+          error: (err as Error).message,
+        },
+        'document_tree_cache_write_failed',
+      );
+    }
+
+    return dtos;
+  }
+
+  /** Called after every mutation that changes what the tree looks like
+   * (create/rename/move/archive/restore/publish/restrict - see each
+   * method below) or that could change which documents are `restricted`.
+   * Best-effort: a failure here just means the next read is a full-TTL
+   * stale window at worst, never a broken response. */
+  private async invalidateTree(workspaceId: string): Promise<void> {
+    try {
+      await this.redis.del(this.treeCacheKey(workspaceId));
+    } catch (err) {
+      this.logger.warn(
+        {
+          event: 'document_tree_cache_invalidate_failed',
+          workspaceId,
+          error: (err as Error).message,
+        },
+        'document_tree_cache_invalidate_failed',
+      );
+    }
   }
 
   async get(
@@ -230,6 +325,7 @@ export class DocumentsService {
       { event: 'document_renamed', workspaceId, documentId },
       'document_renamed',
     );
+    await this.invalidateTree(workspaceId);
 
     return DocumentResponseDto.fromEntity(document);
   }
@@ -239,7 +335,7 @@ export class DocumentsService {
     documentId: string,
     dto: MoveDocumentDto,
   ): Promise<DocumentResponseDto> {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Document);
       const document = await this.getScopedWithManager(
         repo,
@@ -295,6 +391,8 @@ export class DocumentsService {
 
       return DocumentResponseDto.fromEntity(document);
     });
+    await this.invalidateTree(workspaceId);
+    return result;
   }
 
   async archive(workspaceId: string, documentId: string): Promise<void> {
@@ -340,6 +438,7 @@ export class DocumentsService {
       );
     });
 
+    await this.invalidateTree(workspaceId);
     for (const slug of unpublishedSlugs) {
       await this.revalidation.revalidateSlug(slug);
     }
@@ -349,7 +448,7 @@ export class DocumentsService {
     workspaceId: string,
     documentId: string,
   ): Promise<DocumentResponseDto> {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Document);
       const document = await this.getScopedWithManager(
         repo,
@@ -404,6 +503,8 @@ export class DocumentsService {
 
       return DocumentResponseDto.fromEntity(document);
     });
+    await this.invalidateTree(workspaceId);
+    return result;
   }
 
   /**
@@ -440,6 +541,10 @@ export class DocumentsService {
         document.isPublished = true;
         document.publicSlug = candidate;
         document.publishedAt = new Date();
+        document.publicAccessMode = dto.mode ?? 'view';
+        document.publicExpiresAt = dto.expiresAt
+          ? new Date(dto.expiresAt)
+          : null;
         await this.documents.save(document);
 
         this.metrics.documentsPublishedTotal.inc();
@@ -452,6 +557,7 @@ export class DocumentsService {
           await this.revalidation.revalidateSlug(previousSlug);
         }
         await this.revalidation.revalidateSlug(candidate);
+        await this.invalidateTree(workspaceId);
 
         return DocumentResponseDto.fromEntity(document);
       } catch (error) {
@@ -485,6 +591,8 @@ export class DocumentsService {
     const slug = document.publicSlug;
     document.isPublished = false;
     document.publishedAt = null;
+    document.publicAccessMode = 'view';
+    document.publicExpiresAt = null;
     await this.documents.save(document);
 
     this.metrics.documentsUnpublishedTotal.inc();
@@ -496,6 +604,38 @@ export class DocumentsService {
     if (slug) {
       await this.revalidation.revalidateSlug(slug);
     }
+    await this.invalidateTree(workspaceId);
+
+    return DocumentResponseDto.fromEntity(document);
+  }
+
+  /** Toggles document-level restriction (see `Document.restricted` /
+   * `DocumentPermissionsService`) - a plain field flip, same shape as
+   * publish/unpublish. Authorization (OWNER/ADMIN only) is enforced by the
+   * controller via `assertCanManageDocumentAccess`, not here. */
+  async setRestricted(
+    workspaceId: string,
+    documentId: string,
+    restricted: boolean,
+  ): Promise<DocumentResponseDto> {
+    const document = await this.getScopedWithManager(
+      this.documents,
+      workspaceId,
+      documentId,
+    );
+    document.restricted = restricted;
+    await this.documents.save(document);
+
+    this.logger.info(
+      {
+        event: 'document_restriction_changed',
+        workspaceId,
+        documentId,
+        restricted,
+      },
+      'document_restriction_changed',
+    );
+    await this.invalidateTree(workspaceId);
 
     return DocumentResponseDto.fromEntity(document);
   }
@@ -503,11 +643,22 @@ export class DocumentsService {
   /** Unauthenticated read path (PublicDocumentsService) - deliberately not
    * scoped by workspaceId, since a public visitor never supplies one. The
    * `archivedAt: IsNull()` guard is defense-in-depth on top of the
-   * archive-always-unpublishes invariant enforced in `archive()` above. */
+   * archive-always-unpublishes invariant enforced in `archive()` above.
+   * An expired link (`publicExpiresAt` in the past) is treated identically
+   * to a nonexistent/unpublished one - callers get `null`, never a
+   * distinguishing signal that would leak whether a slug ever existed. */
   async findPublishedBySlug(slug: string): Promise<Document | null> {
-    return this.documents.findOne({
+    const document = await this.documents.findOne({
       where: { publicSlug: slug, isPublished: true, archivedAt: IsNull() },
     });
+    if (!document) return null;
+    if (
+      document.publicExpiresAt &&
+      document.publicExpiresAt.getTime() < Date.now()
+    ) {
+      return null;
+    }
+    return document;
   }
 
   private isUniqueSlugViolation(error: unknown): boolean {
