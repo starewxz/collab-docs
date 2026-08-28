@@ -19,12 +19,17 @@ import { CurrentMembership } from '../workspaces/decorators/current-membership.d
 import type { WorkspaceMember } from '../workspaces/entities/workspace-member.entity';
 import { WorkspaceMembershipGuard } from '../workspaces/guards/workspace-membership.guard';
 import { WorkspacePermissionsService } from '../workspaces/workspace-permissions.service';
+import { MetricsService } from '../../common/metrics/metrics.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentResponseDto } from './dto/document-response.dto';
+import { DocumentSearchResultDto } from './dto/document-search-result.dto';
 import { MoveDocumentDto } from './dto/move-document.dto';
 import { PublishDocumentDto } from './dto/publish-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { DocumentsService } from './documents.service';
+
+const MAX_SEARCH_LIMIT = 50;
+const DEFAULT_SEARCH_LIMIT = 20;
 
 @ApiBearerAuth()
 @ApiTags('documents')
@@ -34,6 +39,7 @@ export class DocumentsController {
   constructor(
     private readonly documentsService: DocumentsService,
     private readonly permissions: WorkspacePermissionsService,
+    private readonly metrics: MetricsService,
   ) {}
 
   @Post()
@@ -53,6 +59,36 @@ export class DocumentsController {
     @Query('includeArchived') includeArchived?: string,
   ): Promise<DocumentResponseDto[]> {
     return this.documentsService.list(workspaceId, includeArchived === 'true');
+  }
+
+  /** Registered before `:documentId` so "search" is matched as this route,
+   * not as a document id - any member (including VIEWER) may search, same
+   * bar as list/get. */
+  @Get('search')
+  async search(
+    @Param('workspaceId') workspaceId: string,
+    @Query('q') q: string | undefined,
+    @Query('limit') limitParam: string | undefined,
+    @Query('offset') offsetParam: string | undefined,
+  ): Promise<DocumentSearchResultDto[]> {
+    const limit = Math.min(
+      Math.max(parseInt(limitParam ?? '', 10) || DEFAULT_SEARCH_LIMIT, 1),
+      MAX_SEARCH_LIMIT,
+    );
+    const offset = Math.max(parseInt(offsetParam ?? '', 10) || 0, 0);
+
+    this.metrics.searchRequestsTotal.inc();
+    try {
+      return await this.documentsService.search(
+        workspaceId,
+        q ?? '',
+        limit,
+        offset,
+      );
+    } catch (err) {
+      this.metrics.searchFailuresTotal.inc();
+      throw err;
+    }
   }
 
   @Get(':documentId')

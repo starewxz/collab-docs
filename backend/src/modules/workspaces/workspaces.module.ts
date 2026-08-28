@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { User } from '../users/user.entity';
 import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
@@ -18,6 +19,7 @@ import { WorkspacesService } from './workspaces.service';
 @Module({
   imports: [
     AuthModule,
+    BillingModule, // BillingService (default subscription) / EntitlementsService (invite limit)
     TypeOrmModule.forFeature([
       Workspace,
       WorkspaceMember,

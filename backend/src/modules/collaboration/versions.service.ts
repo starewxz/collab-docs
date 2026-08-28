@@ -8,6 +8,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { In, Repository } from 'typeorm';
 import * as Y from 'yjs';
 import { MetricsService } from '../../common/metrics/metrics.service';
+import { EntitlementsService } from '../billing/entitlements.service';
 import { DocumentsService } from '../documents/documents.service';
 import { UsersService } from '../users/users.service';
 import { CollaborationGateway } from './collaboration.gateway';
@@ -38,6 +39,7 @@ export class VersionsService {
     private readonly gateway: CollaborationGateway,
     private readonly metrics: MetricsService,
     private readonly logger: PinoLogger,
+    private readonly entitlements: EntitlementsService,
   ) {
     this.logger.setContext(VersionsService.name);
   }
@@ -85,12 +87,23 @@ export class VersionsService {
     return VersionDetailResponseDto.fromDetail(version, authorName, blocks);
   }
 
+  /** Manual version snapshots are a PRO-gated feature (Stage 8) - FREE
+   * workspaces still get list/inspect/restore and the automatic
+   * durability buffer, just not on-demand named snapshots. Restore itself
+   * is never gated (it's not "creating a manual snapshot"), and the
+   * system-triggered RESTORE_POINT capture inside `restore()` bypasses
+   * this check entirely, since that's not a user-initiated create. */
   async create(
     workspaceId: string,
     documentId: string,
     userId: string,
     label: string | undefined,
   ): Promise<VersionResponseDto> {
+    await this.entitlements.assertFeatureEnabled(
+      workspaceId,
+      'manualVersionSnapshots',
+      'Manual version snapshots are a PRO feature - upgrade to save named snapshots on demand',
+    );
     const document = await this.documentsService.get(workspaceId, documentId);
     if (document.archivedAt) {
       throw new BadRequestException('Cannot snapshot an archived document');

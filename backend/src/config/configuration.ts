@@ -66,12 +66,23 @@ export interface JwtConfig {
   refreshExpiresInSeconds: number;
 }
 
+export interface BillingConfig {
+  /** Shared secret the (mock) payment provider's webhook must present -
+   * stands in for real signature verification (e.g. Stripe's
+   * `Stripe-Signature` header + signing secret). Never sent to the
+   * browser. Empty in test/CI is fine - the webhook route rejects every
+   * call with 401 in that case, same fail-closed posture as a missing
+   * Stripe signing secret would produce. */
+  webhookSecret: string;
+}
+
 export interface Configuration {
   app: AppConfig;
   postgres: PostgresConfig;
   redis: RedisConfig;
   minio: MinioConfig;
   jwt: JwtConfig;
+  billing: BillingConfig;
 }
 
 export default (): Configuration => ({
@@ -124,5 +135,8 @@ export default (): Configuration => ({
       process.env.JWT_REFRESH_EXPIRES_IN_SECONDS ?? String(60 * 60 * 24 * 30),
       10,
     ),
+  },
+  billing: {
+    webhookSecret: process.env.BILLING_WEBHOOK_SECRET ?? '',
   },
 });

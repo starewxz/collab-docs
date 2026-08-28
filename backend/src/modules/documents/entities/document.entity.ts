@@ -59,6 +59,20 @@ export class Document {
   @Column({ type: 'timestamptz', nullable: true })
   publishedAt: Date | null;
 
+  /**
+   * Stage 8 search: plain-text extraction of the document's current
+   * durable Yjs state (block text joined with spaces, truncated - see
+   * DocumentsService.updateSearchContent), kept in sync by
+   * CollaborationPersistenceService.flush - never read from a live
+   * in-memory Y.Doc directly. `searchVector` (title + contentText,
+   * GENERATED ALWAYS AS ... STORED, GIN-indexed) is DB-managed and
+   * deliberately not mapped here - the application never reads or writes
+   * it as an entity property, only references it in raw SQL inside
+   * DocumentsService.search.
+   */
+  @Column({ type: 'text', nullable: true, select: false })
+  contentText: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

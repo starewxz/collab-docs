@@ -138,7 +138,16 @@ describe('Document versions & durable persistence (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ name })
       .expect(201);
-    return (res.body as WorkspaceBody).id;
+    const workspaceId = (res.body as WorkspaceBody).id;
+    // Manual version snapshots are a Stage 8 PRO-gated feature - this
+    // whole file is testing version-history mechanics, not plan gating,
+    // so every workspace here upgrades immediately via the mock billing
+    // flow (see billing.e2e-spec.ts for the plan-limit-focused tests).
+    await request(baseUrl)
+      .post(`/api/workspaces/${workspaceId}/billing/mock-pay`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    return workspaceId;
   }
 
   async function createDocument(

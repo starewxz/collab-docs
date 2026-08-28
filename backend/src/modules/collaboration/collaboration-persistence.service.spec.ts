@@ -1,5 +1,18 @@
+import * as Y from 'yjs';
 import { CollaborationPersistenceService } from './collaboration-persistence.service';
 import { DocumentVersionKind } from './document-version-kind.enum';
+
+function validYjsState(text: string): Uint8Array {
+  const doc = new Y.Doc();
+  const block = new Y.Map<unknown>();
+  block.set('id', 'b1');
+  block.set('type', 'paragraph');
+  const ytext = new Y.Text();
+  ytext.insert(0, text);
+  block.set('text', ytext);
+  doc.getArray('blocks').insert(0, [block]);
+  return Y.encodeStateAsUpdate(doc);
+}
 
 function buildService(existingAutoRow: { state: Buffer } | null = null) {
   const rows: Record<string, unknown>[] = existingAutoRow
@@ -28,14 +41,16 @@ function buildService(existingAutoRow: { state: Buffer } | null = null) {
   const metrics = {
     collabPersistTotal: { inc: jest.fn() },
   };
+  const documentsService = { updateSearchContent: jest.fn() };
 
   const service = new CollaborationPersistenceService(
     repo as never,
     logger as never,
     metrics as never,
+    documentsService as never,
   );
 
-  return { service, repo, rows, metrics };
+  return { service, repo, rows, metrics, documentsService };
 }
 
 describe('CollaborationPersistenceService', () => {
@@ -105,6 +120,25 @@ describe('CollaborationPersistenceService', () => {
       expect(metrics.collabPersistTotal.inc).toHaveBeenCalledWith({
         result: 'error',
       });
+    });
+
+    it('extracts plain text from the durably-written state and updates the search index (Stage 8)', async () => {
+      const { service, documentsService } = buildService();
+      await service.flush('doc-1', validYjsState('hello searchable world'));
+
+      expect(documentsService.updateSearchContent).toHaveBeenCalledWith(
+        'doc-1',
+        'hello searchable world',
+      );
+    });
+
+    it('does not update the search index when the durable write itself failed', async () => {
+      const { service, repo, documentsService } = buildService();
+      repo.findOne.mockRejectedValueOnce(new Error('db down'));
+
+      await service.flush('doc-1', validYjsState('unreached'));
+
+      expect(documentsService.updateSearchContent).not.toHaveBeenCalled();
     });
   });
 

@@ -6,7 +6,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
 import { getWorkspace } from "@/features/workspaces/api";
 import type { WorkspaceRole } from "@/features/workspaces/types";
-import { isApiError } from "@/lib/api-error";
+import { isApiError, isPlanLimitError } from "@/lib/api-error";
 import {
   archiveDocument,
   createDocument,
@@ -86,7 +86,7 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
       reload();
       select(doc.id);
     } catch (err) {
-      setError(isApiError(err) ? err.message : "Failed to create document.");
+      setError(describeCreateError(err));
     }
   }
 
@@ -98,8 +98,18 @@ export function DocumentSidebar({ workspaceId }: { workspaceId: string }) {
       reload();
       select(doc.id);
     } catch (err) {
-      setError(isApiError(err) ? err.message : "Failed to create document.");
+      setError(describeCreateError(err));
     }
+  }
+
+  /** On the FREE document limit, point to the billing section instead of a
+   * generic failure - the backend is the sole authority on the limit, this
+   * only makes the rejection actionable. */
+  function describeCreateError(err: unknown): string {
+    if (isPlanLimitError(err)) {
+      return `${err.message} Upgrade to PRO from the workspace settings page.`;
+    }
+    return isApiError(err) ? err.message : "Failed to create document.";
   }
 
   async function handleSubmitRename(id: string, title: string) {

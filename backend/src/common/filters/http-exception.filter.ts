@@ -17,6 +17,7 @@ interface ErrorResponseBody {
   path: string;
   correlationId: string;
   timestamp: string;
+  [extra: string]: unknown;
 }
 
 /**
@@ -48,6 +49,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       const { message, error } = this.normalizeBody(body, exception);
       const payload: ErrorResponseBody = {
+        ...this.extraFields(body),
         statusCode: status,
         message,
         error,
@@ -85,6 +87,21 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       'status' in body &&
       'info' in body &&
       'details' in body
+    );
+  }
+
+  /** Domain-specific fields a service attaches to a thrown HttpException
+   * body beyond the standard `message`/`error`/`statusCode` (e.g.
+   * EntitlementsService's `PlanLimitExceededPayload`: `code`, `limitType`,
+   * `limit`, `current`, `plan`) - preserved so the frontend can render a
+   * specific "upgrade to PRO" CTA instead of a generic error message. */
+  private extraFields(body: unknown): Record<string, unknown> {
+    if (typeof body !== 'object' || body === null) return {};
+    const reserved = new Set(['message', 'error', 'statusCode']);
+    return Object.fromEntries(
+      Object.entries(body as Record<string, unknown>).filter(
+        ([key]) => !reserved.has(key),
+      ),
     );
   }
 

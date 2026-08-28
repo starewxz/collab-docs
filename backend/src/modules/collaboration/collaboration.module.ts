@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { UsersModule } from '../users/users.module';
 import { WorkspaceMember } from '../workspaces/entities/workspace-member.entity';
@@ -18,6 +19,7 @@ import { VersionsService } from './versions.service';
     DocumentsModule, // DocumentsService.get() - existence + workspace scoping
     UsersModule, // display name for presence
     WorkspacesModule, // WorkspacePermissionsService
+    BillingModule, // EntitlementsService.assertFeatureEnabled (Stage 8)
     // Same pattern as DocumentsModule: the gateway's own WorkspaceMember
     // repository dependency must be resolvable in this module's scope.
     TypeOrmModule.forFeature([WorkspaceMember, DocumentVersion]),

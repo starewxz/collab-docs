@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button, Card, EmptyState, Input, Spinner } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
+import { BillingSection } from "@/features/billing/BillingSection";
 import { isApiError } from "@/lib/api-error";
 import {
   changeMemberRole,
@@ -158,6 +159,8 @@ export function WorkspaceShell({ workspaceId }: { workspaceId: string }) {
         <h1 className={styles.title}>{workspace.name}</h1>
         <span className={styles.roleBadge}>{myRole}</span>
       </div>
+
+      <BillingSection workspaceId={workspaceId} role={myRole} />
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Members</h2>

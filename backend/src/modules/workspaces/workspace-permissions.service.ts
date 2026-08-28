@@ -161,4 +161,12 @@ export class WorkspacePermissionsService {
       throw new ForbiddenException('You cannot comment in this workspace');
     }
   }
+
+  assertCanManageWorkspaceSettings(role: WorkspaceRole): void {
+    if (!this.canManageWorkspaceSettings(role)) {
+      throw new ForbiddenException(
+        'Only the workspace owner can manage this setting',
+      );
+    }
+  }
 }

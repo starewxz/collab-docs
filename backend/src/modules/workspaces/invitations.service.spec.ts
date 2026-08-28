@@ -47,6 +47,10 @@ function buildService(invitation: WorkspaceInvitation | null) {
   };
   const logger = { setContext: jest.fn(), info: jest.fn(), warn: jest.fn() };
   const metrics = { workspaceInvitationsTotal: { inc: jest.fn() } };
+  const entitlements = {
+    lockWorkspace: jest.fn(),
+    assertCanInviteMember: jest.fn(),
+  };
 
   const service = new InvitationsService(
     dataSource as never,
@@ -57,9 +61,10 @@ function buildService(invitation: WorkspaceInvitation | null) {
     config as never,
     logger as never,
     metrics as never,
+    entitlements as never,
   );
 
-  return { service, manager, savedRows };
+  return { service, manager, savedRows, entitlements };
 }
 
 describe('InvitationsService (expiration + email ownership)', () => {

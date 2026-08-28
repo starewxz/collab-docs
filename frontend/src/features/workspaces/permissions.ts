@@ -39,4 +39,10 @@ export function canModerateComments(role: WorkspaceRole): boolean {
   return role === "OWNER" || role === "ADMIN";
 }
 
+/** Mirrors the backend's assertCanManageWorkspaceSettings (Stage 8) -
+ * billing mutations (checkout/mock-pay/downgrade) are OWNER-only. */
+export function canManageBilling(role: WorkspaceRole): boolean {
+  return role === "OWNER";
+}
+
 export const ASSIGNABLE_ROLES: WorkspaceRole[] = ["ADMIN", "EDITOR", "VIEWER"];

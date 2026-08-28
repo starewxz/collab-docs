@@ -42,6 +42,11 @@ export class MetricsService {
   readonly documentsUnpublishedTotal: Counter<string>;
   readonly publicRenderFailuresTotal: Counter<string>;
   readonly publicRevalidationFailuresTotal: Counter<string>;
+  readonly searchRequestsTotal: Counter<string>;
+  readonly searchFailuresTotal: Counter<string>;
+  readonly planLimitRejectionsTotal: Counter<string>;
+  readonly subscriptionStateChangesTotal: Counter<string>;
+  readonly billingWebhookFailuresTotal: Counter<string>;
 
   constructor() {
     collectDefaultMetrics({ register: this.registry });
@@ -213,6 +218,38 @@ export class MetricsService {
     this.publicRevalidationFailuresTotal = new Counter({
       name: 'public_revalidation_failures_total',
       help: 'Total failed calls to the frontend on-demand revalidation endpoint',
+      registers: [this.registry],
+    });
+
+    this.searchRequestsTotal = new Counter({
+      name: 'search_requests_total',
+      help: 'Total workspace document search requests',
+      registers: [this.registry],
+    });
+
+    this.searchFailuresTotal = new Counter({
+      name: 'search_failures_total',
+      help: 'Total workspace document search requests that failed',
+      registers: [this.registry],
+    });
+
+    this.planLimitRejectionsTotal = new Counter({
+      name: 'plan_limit_rejections_total',
+      help: 'Total requests rejected for exceeding a plan limit or lacking a gated feature',
+      labelNames: ['limit'], // 'documents' | 'members' | 'storage' | a feature name
+      registers: [this.registry],
+    });
+
+    this.subscriptionStateChangesTotal = new Counter({
+      name: 'subscription_state_changes_total',
+      help: 'Total billing webhook/mock-confirm events processed',
+      labelNames: ['result'], // 'applied' | 'duplicate'
+      registers: [this.registry],
+    });
+
+    this.billingWebhookFailuresTotal = new Counter({
+      name: 'billing_webhook_failures_total',
+      help: 'Total billing webhook calls rejected for an invalid/missing shared secret',
       registers: [this.registry],
     });
   }

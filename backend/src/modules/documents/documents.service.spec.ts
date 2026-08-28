@@ -132,6 +132,10 @@ function buildService(seed: Document[] = []) {
     documentsUnpublishedTotal: { inc: jest.fn() },
   };
   const revalidation = { revalidateSlug: jest.fn() };
+  const entitlements = {
+    lockWorkspace: jest.fn(),
+    assertCanCreateDocument: jest.fn(),
+  };
 
   const service = new DocumentsService(
     dataSource as never,
@@ -139,9 +143,10 @@ function buildService(seed: Document[] = []) {
     logger as never,
     metrics as never,
     revalidation as never,
+    entitlements as never,
   );
 
-  return { service, repo, metrics, revalidation };
+  return { service, repo, metrics, revalidation, entitlements };
 }
 
 function doc(overrides: Partial<Document>): Document {

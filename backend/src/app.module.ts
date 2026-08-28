@@ -19,6 +19,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { PublicModule } from './modules/public/public.module';
+import { BillingModule } from './modules/billing/billing.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { PublicModule } from './modules/public/public.module';
     HealthModule,
     UsersModule,
     AuthModule,
+    BillingModule,
     WorkspacesModule,
     DocumentsModule,
     CollaborationModule,

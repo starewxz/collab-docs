@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Card, Spinner } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { isApiError } from "@/lib/api-error";
+import { isApiError, isPlanLimitError } from "@/lib/api-error";
 import { acceptInvitation, rejectInvitation } from "./api";
 import styles from "./InvitationLinkPage.module.css";
 
@@ -23,7 +23,14 @@ export function InvitationLinkPage({ token }: { token: string }) {
       const result = await acceptInvitation(apiFetch, token);
       router.push(`/workspace/${result.workspaceId}`);
     } catch (err) {
-      setError(isApiError(err) ? err.message : "Failed to accept invitation.");
+      // The member-limit check runs at accept time, not invite-creation
+      // time (see backend InvitationsService.performAccept) - the invitee
+      // isn't the one who can upgrade, so point them to the owner instead.
+      if (isPlanLimitError(err)) {
+        setError(`${err.message} Ask the workspace owner to upgrade to PRO.`);
+      } else {
+        setError(isApiError(err) ? err.message : "Failed to accept invitation.");
+      }
     } finally {
       setSubmitting(false);
     }

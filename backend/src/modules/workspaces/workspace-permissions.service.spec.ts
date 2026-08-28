@@ -159,4 +159,22 @@ describe('WorkspacePermissionsService', () => {
       expect(() => permissions.assertCanComment(EDITOR)).not.toThrow();
     });
   });
+
+  describe('canManageWorkspaceSettings (Stage 8 billing mutations reuse this)', () => {
+    it('allows only OWNER', () => {
+      expect(permissions.canManageWorkspaceSettings(OWNER)).toBe(true);
+      expect(permissions.canManageWorkspaceSettings(ADMIN)).toBe(false);
+      expect(permissions.canManageWorkspaceSettings(EDITOR)).toBe(false);
+      expect(permissions.canManageWorkspaceSettings(VIEWER)).toBe(false);
+    });
+
+    it('assertCanManageWorkspaceSettings throws ForbiddenException for everyone but OWNER', () => {
+      expect(() => permissions.assertCanManageWorkspaceSettings(ADMIN)).toThrow(
+        ForbiddenException,
+      );
+      expect(() =>
+        permissions.assertCanManageWorkspaceSettings(OWNER),
+      ).not.toThrow();
+    });
+  });
 });

@@ -9,6 +9,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { MinioService } from '../../storage/minio.service';
+import { EntitlementsService } from '../billing/entitlements.service';
 import { DocumentsService } from '../documents/documents.service';
 import { AttachmentStatus } from './attachment-status.enum';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
@@ -60,6 +61,7 @@ export class AttachmentsService {
     private readonly minio: MinioService,
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
+    private readonly entitlements: EntitlementsService,
   ) {
     this.logger.setContext(AttachmentsService.name);
   }
@@ -84,6 +86,10 @@ export class AttachmentsService {
         `File type "${dto.mimeType}" is not allowed`,
       );
     }
+    // Lighter-weight than the document/member limits: no workspace-row
+    // lock, count-then-check only - see ADR-019 for why this is an
+    // accepted trade-off for this particular limit.
+    await this.entitlements.assertCanUploadAttachment(workspaceId, dto.size);
 
     const objectKey = `attachments/${documentId}/${randomUUID()}-${sanitizeFilename(dto.filename)}`;
     const attachment = await this.attachments.save(

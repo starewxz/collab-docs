@@ -50,6 +50,7 @@ function buildService(seed: Record<string, unknown>[] = []) {
   };
   const logger = { setContext: jest.fn(), info: jest.fn(), warn: jest.fn() };
   const metrics = { attachmentUploadsTotal: { inc: jest.fn() } };
+  const entitlements = { assertCanUploadAttachment: jest.fn() };
 
   const service = new AttachmentsService(
     repo as never,
@@ -57,9 +58,18 @@ function buildService(seed: Record<string, unknown>[] = []) {
     minio as never,
     logger as never,
     metrics as never,
+    entitlements as never,
   );
 
-  return { service, repo, rows, documentsService, minio, metrics };
+  return {
+    service,
+    repo,
+    rows,
+    documentsService,
+    minio,
+    metrics,
+    entitlements,
+  };
 }
 
 describe('AttachmentsService', () => {

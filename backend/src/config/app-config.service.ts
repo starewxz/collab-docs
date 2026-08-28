@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
   AppConfig,
+  BillingConfig,
   JwtConfig,
   MinioConfig,
   PostgresConfig,
@@ -34,5 +35,9 @@ export class AppConfigService {
 
   get jwt(): JwtConfig {
     return this.configService.get<JwtConfig>('jwt')!;
+  }
+
+  get billing(): BillingConfig {
+    return this.configService.get<BillingConfig>('billing')!;
   }
 }

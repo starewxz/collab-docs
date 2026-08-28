@@ -8,9 +8,11 @@ import { PinoLogger } from 'nestjs-pino';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { RevalidationService } from '../../common/revalidation/revalidation.service';
+import { EntitlementsService } from '../billing/entitlements.service';
 import { slugify, slugSuffix } from '../workspaces/slug.util';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentResponseDto } from './dto/document-response.dto';
+import { DocumentSearchResultDto } from './dto/document-search-result.dto';
 import type {
   DocumentPlacement,
   MoveDocumentDto,
@@ -25,6 +27,9 @@ const POSITION_STEP = 1000;
 
 const MAX_SLUG_ATTEMPTS = 5;
 const UNIQUE_VIOLATION = '23505';
+/** Bounds the tsvector/index size and the flush-time decode cost - far
+ * more than enough for meaningful search matching at this project's scale. */
+const MAX_CONTENT_TEXT_LENGTH = 20_000;
 
 function parentClause(parentId: string | null) {
   return parentId === null ? IsNull() : parentId;
@@ -39,54 +44,65 @@ export class DocumentsService {
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
     private readonly revalidation: RevalidationService,
+    private readonly entitlements: EntitlementsService,
   ) {
     this.logger.setContext(DocumentsService.name);
   }
 
+  /** Locks the workspace row before checking+creating so two concurrent
+   * create requests for the same workspace, right at the plan's document
+   * limit, can't both slip through - the second waits for the first
+   * transaction to commit, then sees the up-to-date count. See ADR-019. */
   async create(
     workspaceId: string,
     createdById: string,
     dto: CreateDocumentDto,
   ): Promise<DocumentResponseDto> {
-    const parentId = dto.parentId ?? null;
+    return this.dataSource.transaction(async (manager) => {
+      await this.entitlements.lockWorkspace(manager, workspaceId);
+      await this.entitlements.assertCanCreateDocument(manager, workspaceId);
 
-    if (parentId) {
-      const parent = await this.getScopedWithManager(
-        this.documents,
+      const repo = manager.getRepository(Document);
+      const parentId = dto.parentId ?? null;
+
+      if (parentId) {
+        const parent = await this.getScopedWithManager(
+          repo,
+          workspaceId,
+          parentId,
+        );
+        if (parent.archivedAt) {
+          throw new BadRequestException(
+            'Cannot create a document under an archived parent',
+          );
+        }
+      }
+
+      const position = await this.nextPositionWithManager(
+        repo,
         workspaceId,
         parentId,
       );
-      if (parent.archivedAt) {
-        throw new BadRequestException(
-          'Cannot create a document under an archived parent',
-        );
-      }
-    }
 
-    const position = await this.nextPositionWithManager(
-      this.documents,
-      workspaceId,
-      parentId,
-    );
+      const document = await repo.save(
+        repo.create({
+          workspaceId,
+          parentId,
+          title: dto.title,
+          position,
+          createdById,
+        }),
+      );
 
-    const document = await this.documents.save(
-      this.documents.create({
-        workspaceId,
-        parentId,
-        title: dto.title,
-        position,
-        createdById,
-      }),
-    );
+      this.metrics.documentsCreatedTotal.inc();
+      this.metrics.documentOperationsTotal.inc({ operation: 'create' });
+      this.logger.info(
+        { event: 'document_created', workspaceId, documentId: document.id },
+        'document_created',
+      );
 
-    this.metrics.documentsCreatedTotal.inc();
-    this.metrics.documentOperationsTotal.inc({ operation: 'create' });
-    this.logger.info(
-      { event: 'document_created', workspaceId, documentId: document.id },
-      'document_created',
-    );
-
-    return DocumentResponseDto.fromEntity(document);
+      return DocumentResponseDto.fromEntity(document);
+    });
   }
 
   async list(
@@ -112,6 +128,88 @@ export class DocumentsService {
       documentId,
     );
     return DocumentResponseDto.fromEntity(document);
+  }
+
+  /**
+   * Workspace-scoped full-text search over title + persisted content
+   * (`searchVector`, a GENERATED STORED tsvector column - see the
+   * migration and the Document entity). Archived documents are excluded,
+   * matching `list()`'s default policy - a search result the caller can't
+   * otherwise see in the sidebar would be a confusing inconsistency.
+   * `websearch_to_tsquery` accepts natural query syntax (quotes, AND/OR,
+   * `-exclude`) safely via parameter binding - never raw string
+   * interpolation of `query` into SQL.
+   */
+  async search(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    offset: number,
+  ): Promise<DocumentSearchResultDto[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    // Fully explicit raw select (getRawMany, not getRawAndEntities) -
+    // TypeORM's mixed entity+raw hydration prefixes implicit entity
+    // columns unpredictably (e.g. "d_id"), which is fragile to rely on
+    // when several of the fields returned aren't real entity properties
+    // (snippet/rank) to begin with. Naming every column explicitly avoids
+    // that ambiguity entirely.
+    const rows = await this.documents
+      .createQueryBuilder('d')
+      .select('d.id', 'id')
+      .addSelect('d.title', 'title')
+      .addSelect('d."parentId"', 'parentId')
+      .addSelect('d."updatedAt"', 'updatedAt')
+      .addSelect(
+        `ts_headline('english', coalesce(d."contentText", d.title), websearch_to_tsquery('english', :query), 'MaxFragments=1, MaxWords=25, MinWords=10')`,
+        'snippet',
+      )
+      .addSelect(
+        `ts_rank(d."searchVector", websearch_to_tsquery('english', :query))`,
+        'rank',
+      )
+      .where('d.workspaceId = :workspaceId', { workspaceId })
+      .andWhere('d.archivedAt IS NULL')
+      .andWhere(`d."searchVector" @@ websearch_to_tsquery('english', :query)`, {
+        query: trimmed,
+      })
+      .orderBy('rank', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getRawMany<{
+        id: string;
+        title: string;
+        parentId: string | null;
+        updatedAt: Date;
+        snippet: string | null;
+      }>();
+
+    return rows.map((r) => {
+      const dto = new DocumentSearchResultDto();
+      dto.id = r.id;
+      dto.title = r.title;
+      dto.snippet = r.snippet;
+      dto.parentId = r.parentId;
+      dto.updatedAt = r.updatedAt;
+      return dto;
+    });
+  }
+
+  /** Called by CollaborationPersistenceService.flush with plain text
+   * decoded from the durable Yjs buffer it just wrote - never from a live
+   * in-memory Y.Doc read directly, and never on every keystroke (the same
+   * trailing-throttle that governs the durability buffer governs this).
+   * Not scoped by workspaceId: this is an internal system call keyed by
+   * documentId alone, not a user-facing endpoint. */
+  async updateSearchContent(
+    documentId: string,
+    contentText: string,
+  ): Promise<void> {
+    await this.documents.update(
+      { id: documentId },
+      { contentText: contentText.slice(0, MAX_CONTENT_TEXT_LENGTH) },
+    );
   }
 
   async update(

@@ -2,7 +2,7 @@
 
 PostgreSQL + TypeORM. **`synchronize: false` always** — migrations in `backend/src/database/migrations/` are authoritative. Entities are discovered by glob (`**/*.entity.ts`); no manual entity list to maintain.
 
-Migrations: `1787748663603-EnableUuidExtension` (pgcrypto, so `gen_random_uuid()` works), `1787814681199-Migration` (full Stage 2 schema incl. FKs), `1787824727552-Migration` (`documents` table), `1787838816430-AddDocumentVersions` (`document_versions` table), `1787844286371-AddCommentsNotificationsAttachments` (`attachments`, `comments`, `comment_mentions`, `notifications` tables), `1787856112434-AddDocumentPublishing` (`documents.isPublished`/`publicSlug`/`publishedAt` + unique index). TypeORM's `migration:generate` doesn't emit FKs or partial indexes — every migration here was hand-completed after generation.
+Migrations: `1787748663603-EnableUuidExtension` (pgcrypto, so `gen_random_uuid()` works), `1787814681199-Migration` (full Stage 2 schema incl. FKs), `1787824727552-Migration` (`documents` table), `1787838816430-AddDocumentVersions` (`document_versions` table), `1787844286371-AddCommentsNotificationsAttachments` (`attachments`, `comments`, `comment_mentions`, `notifications` tables), `1787856112434-AddDocumentPublishing` (`documents.isPublished`/`publicSlug`/`publishedAt` + unique index), `1787899218514-AddBilling` (`subscriptions`, `billing_webhook_events` tables + a backfill giving every pre-existing workspace a default FREE/ACTIVE subscription row), `1787899718705-AddDocumentSearch` (`documents.contentText` + generated `searchVector` tsvector column + GIN index). TypeORM's `migration:generate` doesn't emit FKs or partial indexes — every migration here was hand-completed after generation.
 
 ## User (`users`)
 - `id` uuid PK, `email` varchar **unique**, `passwordHash` (`select: false` — never returned by default queries), `firstName`, `lastName`, timestamps.
@@ -31,11 +31,12 @@ OWNER > ADMIN > EDITOR > VIEWER
 `INVITABLE_ROLES = [ADMIN, EDITOR, VIEWER]` — OWNER can never be assigned via invitation or role change.
 
 ## Document (`documents`)
-- `id`, `workspaceId` (FK → workspaces, cascade, indexed), `parentId` (FK → **documents** itself, cascade, nullable = root, indexed), `title` varchar(255), `position` double precision, `createdById` (FK → users, cascade), `archivedAt` nullable timestamptz (indexed), `isPublished` boolean default false, `publicSlug` nullable varchar(255) **unique** (Stage 7), `publishedAt` nullable timestamptz, timestamps.
+- `id`, `workspaceId` (FK → workspaces, cascade, indexed), `parentId` (FK → **documents** itself, cascade, nullable = root, indexed), `title` varchar(255), `position` double precision, `createdById` (FK → users, cascade), `archivedAt` nullable timestamptz (indexed), `isPublished` boolean default false, `publicSlug` nullable varchar(255) **unique** (Stage 7), `publishedAt` nullable timestamptz, `contentText` nullable text (`select: false`, Stage 8), `searchVector` **GENERATED ALWAYS** tsvector (Stage 8, DB-only — never mapped as an entity property), timestamps.
 - Composite index `(workspaceId, parentId, position)` — the shape every list/reorder query filters and sorts by.
 - `publicSlug`'s unique index is a plain (non-partial) unique index — Postgres treats multiple `NULL`s as distinct, so the common unpublished case never collides. Archiving always clears all three publish columns (see `DocumentsService.archive`) — archived + published never coexist.
 - **No `parentPath`/materialized-path column** — the tree is walked live (bounded, max depth 1000) for cycle checks and subtree collection; acceptable at Stage 3 scale, revisit only if depth/fan-out grows large. See ADR-011.
 - `ON DELETE CASCADE` on `parentId` means deleting a document row would cascade-delete its DB-level subtree — in practice this never fires, because the app never hard-deletes a document; archive/restore are soft (see ADR-011).
+- `searchVector` (Stage 8): `GENERATED ALWAYS AS (setweight(to_tsvector('english', coalesce(title,'')), 'A') || setweight(to_tsvector('english', coalesce("contentText",'')), 'B')) STORED`, GIN-indexed. Postgres recomputes it automatically on any `title`/`contentText` UPDATE — no application code keeps it in sync. `contentText` is written only by `CollaborationPersistenceService.flush()` after a durable-buffer write (see ADR-019), capped at 20,000 characters.
 
 ## DocumentVersion (`document_versions`, Stage 5)
 - `id`, `documentId` (FK → documents, cascade, indexed + composite-indexed with `createdAt`), `kind` (enum `document_version_kind`: `auto`/`manual`/`restore-point`), `state` **bytea** (full `Y.encodeStateAsUpdate` blob - binary, never JSON/plain text), `createdById` (FK → users, cascade, **nullable** - null only for `auto` rows), `label` nullable varchar(255), `createdAt`.
@@ -59,8 +60,16 @@ OWNER > ADMIN > EDITOR > VIEWER
 - `id`, `documentId` (FK → documents, cascade, indexed), `objectKey` **unique** varchar(512) (the MinIO object path, `attachments/<documentId>/<uuid>-<sanitized-filename>`), `filename`, `mimeType`, `size` **integer** (deliberately not `bigint` — TypeORM returns `bigint` columns as strings to avoid JS precision loss, which would be an unnecessary type headache given the 20MB max is nowhere near int32 range), `status` (enum `attachment_status`: `pending`/`ready`), `uploadedById` (FK → users, cascade), `createdAt`.
 - Composite index `(documentId, createdAt)`. Binary content is never stored here — only MinIO object metadata/reference; the object itself lives in the `collab-docs` bucket.
 
+## Subscription (`subscriptions`, Stage 8)
+- `id`, `workspaceId` (FK → workspaces, cascade) **unique** — exactly one subscription row per workspace, created transactionally alongside the workspace itself (`BillingService.createDefaultSubscription`, called from `WorkspacesService.createWorkspace`), `plan` (enum `subscription_plan`: `free`/`pro`), `status` (enum `subscription_status`: `active`/`past_due`/`canceled`), `currentPeriodEnd` nullable timestamptz, `provider` varchar default `'mock'`, `providerCustomerId`/`providerSubscriptionId` nullable varchar, timestamps.
+- Billing belongs to the **workspace**, never to an individual document — see ADR-020.
+
+## BillingWebhookEvent (`billing_webhook_events`, Stage 8)
+- `id`, `eventId` **unique** varchar(255) (whatever the provider calls its event id — a UUID for the mock provider), `workspaceId` (FK → workspaces, cascade), `type` varchar(64), `processedAt`.
+- **Unique** `eventId` is the durable idempotency guarantee (`INSERT ... ON CONFLICT DO NOTHING`) for `BillingService.applyEvent` — the same pattern as `Notification.dedupeKey` (ADR-015). See ADR-020 for a real bug found in how the insert result was checked for "was this a duplicate."
+
 ## Key invariants
-- Unique: `users.email`, `workspaces.slug`, `(workspace_members.workspaceId, userId)`, `refresh_tokens.tokenHash`, `workspace_invitations.tokenHash`, active `(workspace_invitations.workspaceId, email)`, `document_versions` active `(documentId) WHERE kind='auto'`, `(comment_mentions.commentId, mentionedUserId)`, `notifications.dedupeKey`, `attachments.objectKey`, `documents.publicSlug`.
+- Unique: `users.email`, `workspaces.slug`, `(workspace_members.workspaceId, userId)`, `refresh_tokens.tokenHash`, `workspace_invitations.tokenHash`, active `(workspace_invitations.workspaceId, email)`, `document_versions` active `(documentId) WHERE kind='auto'`, `(comment_mentions.commentId, mentionedUserId)`, `notifications.dedupeKey`, `attachments.objectKey`, `documents.publicSlug`, `subscriptions.workspaceId`, `billing_webhook_events.eventId`.
 - Refresh tokens and invitation tokens are **hashed at rest**; raw values exist only transiently (response body / cookie).
 - All FKs `ON DELETE CASCADE`.
 - Every document lookup filters by `(id, workspaceId)` together, never `id` alone — the IDOR-protection pattern all document and version code follows.

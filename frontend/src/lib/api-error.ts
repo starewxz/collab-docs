@@ -3,6 +3,15 @@ export interface ApiErrorBody {
   message: string | string[];
   error: string;
   correlationId?: string;
+  /** Present when the backend rejected the request for a plan/entitlement
+   * reason (EntitlementsService's PlanLimitExceededPayload) rather than an
+   * authorization or validation failure - lets callers render an "upgrade
+   * to PRO" CTA instead of a generic error. */
+  code?: string;
+  limitType?: "members" | "documents" | "storage" | string;
+  limit?: number;
+  current?: number;
+  plan?: "free" | "pro";
 }
 
 /** Thrown by apiFetch for any non-2xx response. */
@@ -22,4 +31,10 @@ export class ApiError extends Error {
 
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
+}
+
+export function isPlanLimitError(error: unknown): error is ApiError & {
+  body: ApiErrorBody & { code: "PLAN_LIMIT_EXCEEDED" };
+} {
+  return isApiError(error) && error.body?.code === "PLAN_LIMIT_EXCEEDED";
 }

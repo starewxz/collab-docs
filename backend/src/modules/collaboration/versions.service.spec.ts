@@ -78,6 +78,7 @@ function buildService(seed: Record<string, unknown>[] = []) {
     collabVersionRestoreTotal: { inc: jest.fn() },
   };
   const logger = { setContext: jest.fn(), info: jest.fn(), warn: jest.fn() };
+  const entitlements = { assertFeatureEnabled: jest.fn() };
 
   const service = new VersionsService(
     repo as never,
@@ -88,6 +89,7 @@ function buildService(seed: Record<string, unknown>[] = []) {
     gateway as never,
     metrics as never,
     logger as never,
+    entitlements as never,
   );
 
   return {
@@ -99,6 +101,7 @@ function buildService(seed: Record<string, unknown>[] = []) {
     persistence,
     gateway,
     metrics,
+    entitlements,
   };
 }
 

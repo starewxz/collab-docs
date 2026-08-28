@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Button, Card, EmptyState, Input, Spinner } from "@/components/ui";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRequireAuth } from "@/features/auth/useRequireAuth";
-import { isApiError } from "@/lib/api-error";
+import { isApiError, isPlanLimitError } from "@/lib/api-error";
 import {
   acceptInvitationById,
   createWorkspace,
@@ -81,7 +81,14 @@ export function WorkspaceDashboard() {
       await acceptInvitationById(apiFetch, invitation.id);
       reload();
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : "Failed to accept invitation.");
+      // The member-limit check runs at accept time (see backend
+      // InvitationsService.performAccept) - the invitee isn't the one who
+      // can upgrade, so point them to the owner instead.
+      if (isPlanLimitError(err)) {
+        setActionError(`${err.message} Ask the workspace owner to upgrade to PRO.`);
+      } else {
+        setActionError(isApiError(err) ? err.message : "Failed to accept invitation.");
+      }
     } finally {
       setActioningId(null);
     }

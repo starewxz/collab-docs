@@ -3,8 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { PinoLogger } from 'nestjs-pino';
 import { Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
+import { DocumentsService } from '../documents/documents.service';
 import { DocumentVersionKind } from './document-version-kind.enum';
 import { DocumentVersion } from './entities/document-version.entity';
+import { decodeState, encodeBlocksSnapshot } from './yjs-document.util';
 
 /** Trailing-throttle window: many rapid edits within this window collapse
  * into a single write, but a document being edited continuously still gets
@@ -28,6 +30,7 @@ export class CollaborationPersistenceService implements OnModuleDestroy {
     private readonly versions: Repository<DocumentVersion>,
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
+    private readonly documentsService: DocumentsService,
   ) {
     this.logger.setContext(CollaborationPersistenceService.name);
     const configured = Number(process.env.COLLAB_PERSIST_INTERVAL_MS);
@@ -112,6 +115,39 @@ export class CollaborationPersistenceService implements OnModuleDestroy {
           error: (err as Error).message,
         },
         'collab_persist_failed',
+      );
+      return;
+    }
+
+    await this.updateSearchIndex(documentId, state);
+  }
+
+  /** Stage 8 search: extracts plain text from the state just durably
+   * written (never a live in-memory Y.Doc) and keeps
+   * `documents.contentText` in sync, at the same trailing-throttle cadence
+   * as the durability buffer itself - not per keystroke. A failure here is
+   * a secondary side-effect of an already-successful durability write and
+   * must never surface as one - logged only, same rationale as
+   * RevalidationService/CommentsService.safeEnqueue. */
+  private async updateSearchIndex(
+    documentId: string,
+    state: Uint8Array,
+  ): Promise<void> {
+    try {
+      const blocks = encodeBlocksSnapshot(decodeState(state));
+      const contentText = blocks
+        .map((b) => b.text)
+        .filter((t): t is string => !!t)
+        .join(' ');
+      await this.documentsService.updateSearchContent(documentId, contentText);
+    } catch (err) {
+      this.logger.warn(
+        {
+          event: 'search_index_update_failed',
+          documentId,
+          error: (err as Error).message,
+        },
+        'search_index_update_failed',
       );
     }
   }

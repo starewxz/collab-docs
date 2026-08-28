@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { PinoLogger } from 'nestjs-pino';
 import { DataSource, In, Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
+import { BillingService } from '../billing/billing.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { WorkspaceResponseDto } from './dto/workspace-response.dto';
 import { Workspace } from './entities/workspace.entity';
@@ -23,6 +24,7 @@ export class WorkspacesService {
     private readonly members: Repository<WorkspaceMember>,
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
+    private readonly billing: BillingService,
   ) {
     this.logger.setContext(WorkspacesService.name);
   }
@@ -54,6 +56,9 @@ export class WorkspacesService {
               role: WorkspaceRole.OWNER,
             }),
           );
+          // A workspace must never exist without a subscription row - see
+          // BillingService.createDefaultSubscription (ADR-019).
+          await this.billing.createDefaultSubscription(manager, created.id);
           return created;
         });
 

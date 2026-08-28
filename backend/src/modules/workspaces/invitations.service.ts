@@ -12,6 +12,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { DataSource, In, Repository } from 'typeorm';
 import { AppConfigService } from '../../config/app-config.service';
 import { MetricsService } from '../../common/metrics/metrics.service';
+import { EntitlementsService } from '../billing/entitlements.service';
 import { hashInvitationToken } from '../auth/utils/hash-token.util';
 import { User } from '../users/user.entity';
 import {
@@ -46,6 +47,7 @@ export class InvitationsService {
     private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
     private readonly metrics: MetricsService,
+    private readonly entitlements: EntitlementsService,
   ) {
     this.logger.setContext(InvitationsService.name);
   }
@@ -207,6 +209,18 @@ export class InvitationsService {
       });
 
       if (!existingMembership) {
+        // Locking the Workspace row here (in addition to the invitation
+        // row locked above) serializes concurrent accepts of *different*
+        // invitations for the *same* workspace, so the member-count check
+        // right after can't be raced past the plan limit - see ADR-019.
+        await this.entitlements.lockWorkspace(
+          manager,
+          invitationRow.workspaceId,
+        );
+        await this.entitlements.assertCanInviteMember(
+          manager,
+          invitationRow.workspaceId,
+        );
         try {
           await manager.save(
             manager.create(WorkspaceMember, {
