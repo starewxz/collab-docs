@@ -62,6 +62,15 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       MINIO_ENDPOINT: minio
+      # Presigned attachment URLs are handed to the browser, which can't
+      # resolve the internal Docker hostname above - sign them against the
+      # host-reachable address instead.
+      MINIO_PUBLIC_ENDPOINT: localhost
+      MINIO_PUBLIC_PORT: ${MINIO_HOST_PORT:-9000}
+      # RevalidationService calls the frontend container directly over the
+      # Docker network - .env's FRONTEND_URL is the browser-facing address
+      # (localhost:3001) and isn't reachable from inside this container.
+      FRONTEND_INTERNAL_URL: http://frontend:3000
     ports:
       - "${BACKEND_HOST_PORT:-4000}:4000"
     depends_on:

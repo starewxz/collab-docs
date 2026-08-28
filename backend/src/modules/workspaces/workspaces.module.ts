@@ -38,5 +38,6 @@ import { WorkspacesService } from './workspaces.service';
     WorkspacePermissionsService,
     WorkspaceMembershipGuard,
   ],
+  exports: [WorkspacePermissionsService, WorkspaceMembershipGuard],
 })
 export class WorkspacesModule {}

@@ -105,5 +105,58 @@ describe('WorkspacePermissionsService', () => {
         ForbiddenException,
       );
     });
+
+    it('assertCanCreateDocument throws ForbiddenException for VIEWER only', () => {
+      expect(() => permissions.assertCanCreateDocument(VIEWER)).toThrow(
+        ForbiddenException,
+      );
+      expect(() => permissions.assertCanCreateDocument(EDITOR)).not.toThrow();
+    });
+
+    it('assertCanEditDocument throws ForbiddenException for VIEWER only', () => {
+      expect(() => permissions.assertCanEditDocument(VIEWER)).toThrow(
+        ForbiddenException,
+      );
+      expect(() => permissions.assertCanEditDocument(EDITOR)).not.toThrow();
+    });
+  });
+
+  describe('document permissions (OWNER/ADMIN/EDITOR mutate, VIEWER read-only)', () => {
+    it('canCreateDocument allows everyone except VIEWER', () => {
+      expect(permissions.canCreateDocument(OWNER)).toBe(true);
+      expect(permissions.canCreateDocument(ADMIN)).toBe(true);
+      expect(permissions.canCreateDocument(EDITOR)).toBe(true);
+      expect(permissions.canCreateDocument(VIEWER)).toBe(false);
+    });
+
+    it('canEditDocument allows everyone except VIEWER', () => {
+      expect(permissions.canEditDocument(OWNER)).toBe(true);
+      expect(permissions.canEditDocument(ADMIN)).toBe(true);
+      expect(permissions.canEditDocument(EDITOR)).toBe(true);
+      expect(permissions.canEditDocument(VIEWER)).toBe(false);
+    });
+  });
+
+  describe('canComment / canModerateComments (Stage 6)', () => {
+    it('canComment allows everyone except VIEWER', () => {
+      expect(permissions.canComment(OWNER)).toBe(true);
+      expect(permissions.canComment(ADMIN)).toBe(true);
+      expect(permissions.canComment(EDITOR)).toBe(true);
+      expect(permissions.canComment(VIEWER)).toBe(false);
+    });
+
+    it('canModerateComments allows only OWNER/ADMIN', () => {
+      expect(permissions.canModerateComments(OWNER)).toBe(true);
+      expect(permissions.canModerateComments(ADMIN)).toBe(true);
+      expect(permissions.canModerateComments(EDITOR)).toBe(false);
+      expect(permissions.canModerateComments(VIEWER)).toBe(false);
+    });
+
+    it('assertCanComment throws ForbiddenException for VIEWER only', () => {
+      expect(() => permissions.assertCanComment(VIEWER)).toThrow(
+        ForbiddenException,
+      );
+      expect(() => permissions.assertCanComment(EDITOR)).not.toThrow();
+    });
   });
 });

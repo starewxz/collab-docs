@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   canChangeMemberRole,
+  canComment,
   canInviteMembers,
   canLeaveWorkspace,
+  canModerateComments,
   canRemoveMember,
 } from "./permissions";
 
@@ -53,5 +55,23 @@ describe("canLeaveWorkspace (UI gating)", () => {
     expect(canLeaveWorkspace("ADMIN")).toBe(true);
     expect(canLeaveWorkspace("EDITOR")).toBe(true);
     expect(canLeaveWorkspace("VIEWER")).toBe(true);
+  });
+});
+
+describe("canComment (UI gating)", () => {
+  it("allows everyone except VIEWER", () => {
+    expect(canComment("OWNER")).toBe(true);
+    expect(canComment("ADMIN")).toBe(true);
+    expect(canComment("EDITOR")).toBe(true);
+    expect(canComment("VIEWER")).toBe(false);
+  });
+});
+
+describe("canModerateComments (UI gating)", () => {
+  it("allows only OWNER/ADMIN", () => {
+    expect(canModerateComments("OWNER")).toBe(true);
+    expect(canModerateComments("ADMIN")).toBe(true);
+    expect(canModerateComments("EDITOR")).toBe(false);
+    expect(canModerateComments("VIEWER")).toBe(false);
   });
 });

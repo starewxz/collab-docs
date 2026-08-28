@@ -1,13 +1,13 @@
 # Development Rules
 
 1. Inspect existing implementation before changing architecture — read `01-architecture.md` + relevant source, don't assume.
-2. Don't rewrite working Stage 1/2 infrastructure without a concrete reason.
+2. Don't rewrite working Stage 1/2/3/4/5 infrastructure without a concrete reason.
 3. Strict TypeScript everywhere; avoid `any`.
 4. Controllers hold HTTP concerns only — domain logic lives in services.
 5. All workspace authorization goes through `WorkspacePermissionsService` — never inline `role === 'ADMIN'`.
 6. Never trust a workspace role from a JWT claim — resolve current membership from the DB (`WorkspaceMembershipGuard`).
 7. Non-member access to a workspace-scoped resource → 404. Member with insufficient role → 403. Keep this split consistent.
-8. Always scope tenant resources by `workspaceId` in queries — never look up a member/invitation by id alone (IDOR).
+8. Always scope tenant resources by `workspaceId` in queries — never look up a member/invitation/document by id alone (IDOR).
 9. TypeORM migrations only; never set `synchronize: true`.
 10. Multi-write invariants (workspace+owner creation, invitation accept) use a DB transaction, with a DB unique/partial-unique constraint as the final concurrency guard — not just an app-level `if (!exists)` check.
 11. Refresh tokens: httpOnly cookie only, hashed at rest, never localStorage. Access tokens: in-memory only on the frontend.

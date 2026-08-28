@@ -33,6 +33,10 @@ interface AuthContextValue {
   /** Authenticated fetch: attaches the access token and retries once via
    * silent refresh on a 401 before giving up. */
   apiFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
+  /** Raw in-memory access token, for callers that can't go through
+   * `apiFetch` (e.g. a WebSocket handshake's `auth` payload). Same token,
+   * same in-memory-only lifetime - never persisted anywhere new. */
+  getAccessToken: () => string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -128,9 +132,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const getAccessToken = useCallback(() => accessTokenRef.current, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, logout, apiFetch }),
-    [status, user, login, register, logout, apiFetch],
+    () => ({ status, user, login, register, logout, apiFetch, getAccessToken }),
+    [status, user, login, register, logout, apiFetch, getAccessToken],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

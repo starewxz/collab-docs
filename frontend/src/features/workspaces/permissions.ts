@@ -31,4 +31,12 @@ export function canLeaveWorkspace(role: WorkspaceRole): boolean {
   return role !== "OWNER";
 }
 
+export function canComment(role: WorkspaceRole): boolean {
+  return role !== "VIEWER";
+}
+
+export function canModerateComments(role: WorkspaceRole): boolean {
+  return role === "OWNER" || role === "ADMIN";
+}
+
 export const ASSIGNABLE_ROLES: WorkspaceRole[] = ["ADMIN", "EDITOR", "VIEWER"];

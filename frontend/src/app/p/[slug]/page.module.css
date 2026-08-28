@@ -1,0 +1,11 @@
+.page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 var(--space-6) 0;
+}

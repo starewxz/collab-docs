@@ -28,8 +28,8 @@
 
 ## Stage status
 
-- **Completed: Stage 1** (foundation/infra) **and Stage 2** (auth + workspaces + RBAC + invitations).
-- **Next: Stage 3** (documents foundation — not started, no Document entity/module exists yet).
+- **Completed: Stage 1** (foundation/infra), **Stage 2** (auth + workspaces + RBAC + invitations), **Stage 3** (document CRUD/tree/ordering/archive-restore), **Stage 4** (realtime Yjs collaboration + presence), **Stage 5** (durable CRDT persistence + version history), **Stage 6** (social — comments, mentions, notifications, attachments), **Stage 7** (public sharing, SSR/ISR, SEO).
+- **Next: Stage 8** (growth — search, billing, plan limits — not started).
 
 ## Facts every agent must know
 
@@ -37,7 +37,9 @@
 2. `WorkspacePermissionsService` is the single source of truth for authorization rules. Never inline `role === 'ADMIN'` checks.
 3. `WorkspaceMembershipGuard` returns **404** for non-members (not 403), to avoid confirming a workspace exists.
 4. Access token: short-lived JWT, returned in the response body only, kept in-memory on the frontend (never localStorage). Refresh token: opaque random value, httpOnly cookie, hashed at rest, rotates on every use with reuse detection.
-5. No `Document` entity/module exists yet — Stage 3 has not started.
-6. Migrations are authoritative; `synchronize` is always `false`.
-7. Don't rewrite Stage 1/2 infra without a concrete reason — see `06-rules.md`.
-8. Full endpoint/entity/route detail lives in `03-api.md`, `04-database.md`, `05-frontend.md` — not repeated here.
+5. `Document` entity/module exists (`backend/src/modules/documents/`) — CRUD, tree/parentId hierarchy, fractional-position ordering, whole-subtree archive/restore.
+6. `CollaborationGateway`/`CollaborationService` (`backend/src/modules/collaboration/`) provide live Yjs sync + presence over a `/collab` socket.io namespace, authorized the same way as REST (JWT + membership + `canEditDocument`).
+7. Collaborative state is durable since Stage 5: `CollaborationPersistenceService` upserts one `document_versions` row (`kind='auto'`) per document on a throttled interval; `VersionsService` provides explicit history (`manual`/`restore-point` rows) with list/inspect/create/restore. Verified surviving a real Docker container restart. See ADR-013/014.
+8. Migrations are authoritative; `synchronize` is always `false`.
+9. Don't rewrite Stage 1/2/3/4/5 infra without a concrete reason — see `06-rules.md`.
+10. Full endpoint/entity/route detail lives in `03-api.md`, `04-database.md`, `05-frontend.md` — not repeated here.

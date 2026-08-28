@@ -79,14 +79,30 @@ export class WorkspacePermissionsService {
     return role !== WorkspaceRole.OWNER;
   }
 
-  /** Future-ready only - no document module exists yet in Stage 2. */
   canCreateDocument(role: WorkspaceRole): boolean {
     return role !== WorkspaceRole.VIEWER;
   }
 
-  /** Future-ready only - no document module exists yet in Stage 2. */
+  /** Covers rename, move/reorder, archive, and restore - all non-VIEWER mutations. */
   canEditDocument(role: WorkspaceRole): boolean {
     return role !== WorkspaceRole.VIEWER;
+  }
+
+  /** Creating/replying-to/resolving comments and uploading attachments are
+   * all "you can participate in this document" actions - same bar as
+   * editing document content. Kept as its own named method (rather than
+   * reusing canEditDocument's call sites directly) so comment/attachment
+   * policy can diverge from document-content policy later without
+   * conflating the two concepts. */
+  canComment(role: WorkspaceRole): boolean {
+    return role !== WorkspaceRole.VIEWER;
+  }
+
+  /** OWNER/ADMIN may delete (moderate) any member's comment, mirroring
+   * their broader member-management authority elsewhere. Editing another
+   * user's comment is never allowed, by anyone, regardless of role. */
+  canModerateComments(role: WorkspaceRole): boolean {
+    return role === WorkspaceRole.OWNER || role === WorkspaceRole.ADMIN;
   }
 
   assertCanInviteMembers(role: WorkspaceRole): void {
@@ -121,6 +137,28 @@ export class WorkspacePermissionsService {
   ): void {
     if (!this.canRemoveMember(actorRole, targetRole)) {
       throw new ForbiddenException('You cannot remove this member');
+    }
+  }
+
+  assertCanCreateDocument(role: WorkspaceRole): void {
+    if (!this.canCreateDocument(role)) {
+      throw new ForbiddenException(
+        'You cannot create documents in this workspace',
+      );
+    }
+  }
+
+  assertCanEditDocument(role: WorkspaceRole): void {
+    if (!this.canEditDocument(role)) {
+      throw new ForbiddenException(
+        'You cannot modify documents in this workspace',
+      );
+    }
+  }
+
+  assertCanComment(role: WorkspaceRole): void {
+    if (!this.canComment(role)) {
+      throw new ForbiddenException('You cannot comment in this workspace');
     }
   }
 }

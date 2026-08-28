@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { LogoutButton } from "@/features/auth/LogoutButton";
+import { NotificationsBell } from "@/features/notifications/NotificationsBell";
 import { listWorkspaces } from "./api";
 import type { Workspace } from "./types";
 import styles from "./WorkspaceSwitcher.module.css";
@@ -53,6 +54,7 @@ export function WorkspaceSwitcher() {
           + New workspace
         </Link>
       </div>
+      <NotificationsBell />
       <LogoutButton />
     </nav>
   );
