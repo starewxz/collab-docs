@@ -9,13 +9,11 @@ const POSITION_STEP = 1000;
  * reparents as a child of it. Mirrors the common "Notion-style" tree DnD
  * affordance without needing per-pixel drop targets. */
 export function resolveDropZone(
-  draggedRectTop: number,
-  draggedRectHeight: number,
+  pointerY: number,
   targetRectTop: number,
   targetRectHeight: number,
 ): DropZone {
-  const draggedCenter = draggedRectTop + draggedRectHeight / 2;
-  const relative = (draggedCenter - targetRectTop) / targetRectHeight;
+  const relative = (pointerY - targetRectTop) / targetRectHeight;
   if (relative < 0.25) return "before";
   if (relative > 0.75) return "after";
   return "inside";
@@ -107,10 +105,26 @@ export function resolveDragEndMove(
   if (isSelfOrDescendant(documents, nodeId, target.id)) return null;
 
   if (target.zone === "inside") {
+    const children = documents
+      .filter((d) => d.parentId === target.id)
+      .sort((a, b) => a.position - b.position);
+    if (moved.parentId === target.id && children.at(-1)?.id === nodeId) return null;
     return { parentId: target.id };
   }
 
   const targetNode = documents.find((d) => d.id === target.id);
   if (!targetNode) return null;
+  const siblings = documents
+    .filter((d) => d.parentId === targetNode.parentId)
+    .sort((a, b) => a.position - b.position);
+  const movedIndex = siblings.findIndex((d) => d.id === nodeId);
+  const targetIndex = siblings.findIndex((d) => d.id === target.id);
+  if (
+    moved.parentId === targetNode.parentId &&
+    ((target.zone === "before" && movedIndex === targetIndex - 1) ||
+      (target.zone === "after" && movedIndex === targetIndex + 1))
+  ) {
+    return null;
+  }
   return { parentId: targetNode.parentId, referenceId: target.id, placement: target.zone };
 }

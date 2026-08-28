@@ -56,9 +56,6 @@ services:
     env_file:
       - .env
     environment:
-      # .env's NODE_ENV is tuned for local (non-Docker) dev; containers
-      # always run the compiled production build.
-      NODE_ENV: production
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       MINIO_ENDPOINT: minio

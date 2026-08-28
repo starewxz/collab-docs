@@ -37,7 +37,7 @@ Full visual/UX redesign of every page onto a new design-token system (`app/globa
 Eight specific technical-task gaps closed, verified against the freshly rebuilt Docker stack (backend unit 221, e2e 122 [1 known pre-existing flaky timing test, confirmed flaky on the unmodified codebase too - not a regression], frontend vitest 93, all lint/typecheck/build green):
 1. **Document-level ACL** — `DocumentPermissionsService` + `document_collaborators` table + `documents.restricted`, layered on workspace role, enforced identically over REST and the `/collab` gateway. See ADR-022.
 2. **Public edit-by-link + expiry** — `documents.publicAccessMode`/`publicExpiresAt`, anonymous `join-public` gateway event, `PublicCollaborativeEditor` frontend. See ADR-023.
-3. **Sidebar drag-and-drop** — `@dnd-kit/core`, zone-based drop targets, optimistic-with-rollback, zero backend changes (as ADR-012 predicted). See ADR-027.
+3. **Sidebar drag-and-drop** — `@dnd-kit/core`, pointer-position zone targeting, optimistic-with-rollback-and-resync, zero backend changes (as ADR-012 predicted). See ADR-027.
 4. **Streaming SSR** — `/p/[slug]` splits into an instant static shell + a `<Suspense>`-wrapped async content component; verified as genuinely multi-chunk via curl, not a client spinner.
 5. **Server Actions** — exactly two (`inviteMemberAction`, `createWorkspaceAction`), token-passthrough rather than cookie-based, to avoid racing the client's own refresh-token rotation. See ADR-028.
 6. **Async search indexing** — `CollaborationPersistenceService.flush()` now enqueues onto `QueueName.SEARCH_INDEX` (previously reserved, no processor) instead of writing `contentText` inline; new `SearchIndexProcessor` re-reads durable state, idempotent by construction. See ADR-024.

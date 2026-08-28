@@ -9,7 +9,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragOverEvent,
+  type DragMoveEvent,
 } from "@dnd-kit/core";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -28,13 +28,13 @@ import {
   renameDocument,
   restoreDocument,
 } from "./api";
-import { computeOptimisticMove, isSelfOrDescendant, resolveDropZone } from "./dragMove";
+import { computeOptimisticMove, resolveDragEndMove, resolveDropZone } from "./dragMove";
 import { ROOT_DROP_ZONE_ID, type DropZone } from "./dragTypes";
 import styles from "./DocumentSidebar.module.css";
 import { canCreateDocument, canEditDocument } from "./permissions";
 import { DocumentTreeItem } from "./DocumentTreeItem";
 import { buildDocumentTree } from "./tree";
-import type { DocumentNode, DocumentPlacement } from "./types";
+import type { DocumentNode } from "./types";
 
 export function DocumentSidebar({
   workspaceId,
@@ -231,10 +231,10 @@ export function DocumentSidebar({
     }
   }
 
-  /** Called continuously while dragging (dnd-kit re-fires on every frame
-   * the pointer moves over a droppable) - just tracks which row/zone to
-   * highlight, no data mutation happens here. */
-  function handleDragOver(event: DragOverEvent) {
+  /** Track the pointer on every drag frame. `onDragOver` only fires when
+   * the collided droppable changes, so it cannot reliably distinguish the
+   * before/inside/after bands within one row. */
+  function handleDragMove(event: DragMoveEvent) {
     const { active, over } = event;
     // A row is both draggable and droppable, so early in a drag (before
     // the pointer has left the source row) `over` can briefly be the row
@@ -248,14 +248,10 @@ export function DocumentSidebar({
       setDragOverTarget({ id: ROOT_DROP_ZONE_ID, zone: "inside" });
       return;
     }
-    const activeRect = active.rect.current.translated;
-    if (!activeRect) return;
-    const zone = resolveDropZone(
-      activeRect.top,
-      activeRect.height,
-      over.rect.top,
-      over.rect.height,
-    );
+    const activator = event.activatorEvent;
+    if (!(activator instanceof PointerEvent)) return;
+    const pointerY = activator.clientY + event.delta.y;
+    const zone = resolveDropZone(pointerY, over.rect.top, over.rect.height);
     setDragOverTarget({ id: String(over.id), zone });
   }
 
@@ -286,6 +282,7 @@ export function DocumentSidebar({
       reload();
     } catch (err) {
       setDocuments(previous);
+      reload();
       setError(isApiError(err) ? err.message : "Failed to move document.");
     }
   }
@@ -324,7 +321,7 @@ export function DocumentSidebar({
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={(event) => setDraggingId(String(event.active.id))}
-          onDragOver={handleDragOver}
+          onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
           onDragCancel={() => {
             setDraggingId(null);

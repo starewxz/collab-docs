@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { computeOptimisticMove, isSelfOrDescendant, resolveDropZone } from "./dragMove";
+import {
+  computeOptimisticMove,
+  isSelfOrDescendant,
+  resolveDragEndMove,
+  resolveDropZone,
+} from "./dragMove";
+import { ROOT_DROP_ZONE_ID } from "./dragTypes";
 import type { DocumentNode } from "./types";
 
 function doc(overrides: Partial<DocumentNode>): DocumentNode {
@@ -57,15 +63,50 @@ describe("isSelfOrDescendant", () => {
 describe("resolveDropZone", () => {
   // Target row spans y=100..132 (height 32).
   it("resolves to 'before' when the dragged item is in the top quarter", () => {
-    expect(resolveDropZone(100, 4, 100, 32)).toBe("before");
+    expect(resolveDropZone(102, 100, 32)).toBe("before");
   });
 
   it("resolves to 'after' when the dragged item is in the bottom quarter", () => {
-    expect(resolveDropZone(128, 4, 100, 32)).toBe("after");
+    expect(resolveDropZone(130, 100, 32)).toBe("after");
   });
 
   it("resolves to 'inside' when the dragged item is over the middle half", () => {
-    expect(resolveDropZone(114, 4, 100, 32)).toBe("inside");
+    expect(resolveDropZone(116, 100, 32)).toBe("inside");
+  });
+});
+
+describe("resolveDragEndMove", () => {
+  const docs = [
+    doc({ id: "a", position: 1000 }),
+    doc({ id: "x", parentId: "a", position: 1000 }),
+    doc({ id: "b", position: 2000 }),
+    doc({ id: "c", position: 3000 }),
+  ];
+
+  it("reorders a root sibling before another root sibling", () => {
+    expect(resolveDragEndMove(docs, "b", { id: "a", zone: "before" })).toEqual({
+      parentId: null,
+      referenceId: "a",
+      placement: "before",
+    });
+  });
+
+  it("moves a child into another parent and back to root", () => {
+    expect(resolveDragEndMove(docs, "x", { id: "b", zone: "inside" })).toEqual({
+      parentId: "b",
+    });
+    expect(resolveDragEndMove(docs, "x", { id: ROOT_DROP_ZONE_ID, zone: "inside" })).toEqual({
+      parentId: null,
+    });
+  });
+
+  it("rejects self and descendant targets", () => {
+    expect(resolveDragEndMove(docs, "a", { id: "a", zone: "inside" })).toBeNull();
+    expect(resolveDragEndMove(docs, "a", { id: "x", zone: "inside" })).toBeNull();
+  });
+
+  it("does not submit an already-adjacent sibling placement", () => {
+    expect(resolveDragEndMove(docs, "b", { id: "a", zone: "after" })).toBeNull();
   });
 });
 

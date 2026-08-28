@@ -4,12 +4,14 @@
 
 **FINAL — Submission Ready, plus a post-Stage-10 TT gap closure pass.** Stage 10 (Final Testing, Security, Observability & Submission Audit) is complete. No later roadmap stage is defined.
 
+The later submission-regression repair is also complete. Local Compose no longer overrides the backend to production security behavior (which incorrectly set `Secure` cookies on HTTP localhost), and document-tree DnD now computes zones from the pointer on every drag frame, avoids adjacent no-ops, and resyncs after rollback. These changes are intentionally uncommitted.
+
 ## Verified Final State
 
 - Complete product domains: auth/refresh/logout, multi-tenant workspaces and RBAC, invitations, nested documents, Yjs collaboration/presence/reconnect, durable CRDT state and version restore, comments/mentions/notifications, MinIO attachments, public SSR/ISR pages (view **and** edit-by-link), search (sync full-text read path + async index writes), FREE/PRO entitlements, and document-level ACL layered on workspace roles.
 - Tests run for this pass (rebuilt Docker stack): 221 backend unit, 122 backend e2e (1 known pre-existing flaky timing test — "Reconnect / resync" in `collaboration.e2e-spec.ts`, confirmed flaky on the *unmodified* codebase too under full-suite load, not a regression), 93 frontend vitest; backend/frontend lint, typecheck, and production builds all passed. Backend lint has the same two pre-existing test-only `no-unsafe-argument` warnings as every prior stage, zero errors.
 - Docker Compose rebuilt from scratch with all changes; all five services report healthy. Verified live via curl/socket.io-client against the rebuilt stack: register→workspace→document→publish(edit mode)→public page round trip, document-level ACL over both REST and the gateway, async search indexing (not searchable immediately after edit, searchable after the queue processes), tree-cache invalidation, and the streamed public-page response (confirmed genuinely multi-chunk, not a client spinner).
-- Browser automation was **unavailable in this environment** (same limitation noted every stage since Stage 6) — the two new Server Actions and the DnD pointer-drag gesture specifically could not be exercised in a real browser; verified by code review + successful build only.
+- Browser automation was **unavailable in this environment** (same limitation noted every stage since Stage 6) — the DnD pointer gesture could not be exercised in a real browser. Its targeting resolver is unit-tested and all reorder/reparent/root/nested operations were verified through the live API, including persistence across a Compose restart.
 
 ## Post-Stage-10 Frontend Redesign
 
