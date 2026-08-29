@@ -12,6 +12,7 @@ import {
 } from "react";
 import { publicEnv } from "@/config/env";
 import { ApiError, type ApiErrorBody } from "@/lib/api-error";
+import { singleFlight } from "@/lib/single-flight";
 import {
   loginRequest,
   logoutRequest,
@@ -49,9 +50,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // it from the httpOnly refresh cookie.
   const accessTokenRef = useRef<string | null>(null);
 
+  // Coalesces every concurrent refresh attempt (bootstrap + any number of
+  // apiFetch 401 retries) into a single in-flight `/auth/refresh` call -
+  // see single-flight.ts for why firing one per caller is unsafe. Built
+  // once via useState's lazy initializer (not a ref read during render).
+  const [refreshOnce] = useState(() => singleFlight(refreshRequest));
+
   useEffect(() => {
     let cancelled = false;
-    refreshRequest()
+    refreshOnce()
       .then((res) => {
         if (cancelled) return;
         accessTokenRef.current = res.accessToken;
@@ -64,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshOnce]);
 
   const login = useCallback(async (input: LoginInput) => {
     const res = await loginRequest(input);
@@ -109,7 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.status === 401) {
         try {
-          const refreshed = await refreshRequest();
+          // Goes through the shared single-flight wrapper, not a raw
+          // refreshRequest() call: several apiFetch callers can each see a
+          // 401 around the same time (e.g. a page firing multiple queries
+          // at once), and each independently calling refresh would race
+          // the backend's rotation - see refreshOnce above and
+          // single-flight.ts.
+          const refreshed = await refreshOnce();
           accessTokenRef.current = refreshed.accessToken;
           setUser(refreshed.user);
           response = await doFetch();
@@ -129,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       return data as T;
     },
-    [],
+    [refreshOnce],
   );
 
   const getAccessToken = useCallback(() => accessTokenRef.current, []);

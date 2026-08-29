@@ -66,6 +66,20 @@ export interface JwtConfig {
   refreshExpiresInSeconds: number;
 }
 
+export interface ThrottleConfig {
+  loginLimit: number;
+  loginTtlMs: number;
+  /**
+   * Deliberately overridable per-environment: production keeps this tight
+   * against registration spam, but the e2e suite legitimately registers
+   * many accounts from one process within the same window (the comment on
+   * AuthModule's bucket already carves out "test suites" as expected
+   * traffic) - see .env.test / CI workflow for the raised test value.
+   */
+  registerLimit: number;
+  registerTtlMs: number;
+}
+
 export interface BillingConfig {
   /** Shared secret the (mock) payment provider's webhook must present -
    * stands in for real signature verification (e.g. Stripe's
@@ -83,6 +97,7 @@ export interface Configuration {
   minio: MinioConfig;
   jwt: JwtConfig;
   billing: BillingConfig;
+  throttle: ThrottleConfig;
 }
 
 export default (): Configuration => ({
@@ -138,5 +153,14 @@ export default (): Configuration => ({
   },
   billing: {
     webhookSecret: process.env.BILLING_WEBHOOK_SECRET ?? '',
+  },
+  throttle: {
+    loginLimit: parseInt(process.env.THROTTLE_LOGIN_LIMIT ?? '5', 10),
+    loginTtlMs: parseInt(process.env.THROTTLE_LOGIN_TTL_MS ?? '60000', 10),
+    registerLimit: parseInt(process.env.THROTTLE_REGISTER_LIMIT ?? '20', 10),
+    registerTtlMs: parseInt(
+      process.env.THROTTLE_REGISTER_TTL_MS ?? '60000',
+      10,
+    ),
   },
 });

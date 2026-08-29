@@ -63,6 +63,15 @@ jobs:
           echo "MinIO did not become ready in time" >&2
           exit 1
 
+      - name: Run migrations
+        run: npm run migration:run:prod
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: collab_docs
+          POSTGRES_PASSWORD: collab_docs
+          POSTGRES_DB: collab_docs
+
       - name: e2e tests
         run: npm run test:e2e
         env:
@@ -82,6 +91,7 @@ jobs:
           BACKEND_URL: http://localhost:4000
           JWT_ACCESS_SECRET: ci-access-secret-please-do-not-use-in-prod-0000
           JWT_REFRESH_SECRET: ci-refresh-secret-please-do-not-use-in-prod-000
+          THROTTLE_REGISTER_LIMIT: "200"
 
   frontend:
     runs-on: ubuntu-latest

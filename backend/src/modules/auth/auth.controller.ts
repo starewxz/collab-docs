@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -34,9 +34,11 @@ export class AuthController {
     private readonly config: AppConfigService,
   ) {}
 
+  // Limit/ttl for the 'register' bucket come from the module-level
+  // ThrottlerModule registration (env-configurable) - not overridden here,
+  // so the test env's higher limit actually takes effect.
   @UseGuards(ThrottlerGuard)
   @SkipThrottle({ login: true })
-  @Throttle({ register: { limit: 20, ttl: 60000 } })
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
@@ -53,7 +55,6 @@ export class AuthController {
 
   @UseGuards(ThrottlerGuard)
   @SkipThrottle({ register: true })
-  @Throttle({ login: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @Post('login')
   async login(

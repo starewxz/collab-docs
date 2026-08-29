@@ -123,6 +123,88 @@ describe('Auth + Workspaces (e2e)', () => {
       await agent.post('/api/auth/logout').expect(200);
       await agent.post('/api/auth/refresh').expect(401);
     });
+
+    it('the newly rotated token remains valid for further use', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const email = emailFor('flow-a-rotated-valid');
+      await register(agent, email, 'FlowARotated');
+
+      await agent.post('/api/auth/refresh').expect(200);
+
+      // The rotated cookie (now held by the agent's jar) must itself work
+      // for a subsequent refresh - rotation isn't a one-shot token.
+      const secondRefresh = await agent.post('/api/auth/refresh').expect(200);
+      expect(
+        (secondRefresh.body as AuthResponseBody).accessToken,
+      ).toBeDefined();
+    });
+
+    it('of two concurrent refreshes on the same token, exactly one succeeds and the other is rejected', async () => {
+      const email = emailFor('flow-a-concurrent');
+      const registerRes = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          email,
+          password: 'password123',
+          firstName: 'Concurrent',
+          lastName: 'Test',
+        })
+        .expect(201);
+      const cookie = extractRefreshCookie(registerRes);
+
+      // Same still-valid token, fired at the same time - mirrors two
+      // apiFetch callers each hitting a 401 around the same moment. The
+      // backend must not let both rotations succeed (that would leave two
+      // live sessions from one presented token), and must not silently
+      // treat the race as success for neither.
+      const [first, second] = await Promise.all([
+        request(app.getHttpServer())
+          .post('/api/auth/refresh')
+          .set('Cookie', cookie),
+        request(app.getHttpServer())
+          .post('/api/auth/refresh')
+          .set('Cookie', cookie),
+      ]);
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([200, 401]);
+    });
+
+    it('a persisted refresh session survives the app being recreated (restart-like)', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const email = emailFor('flow-a-restart');
+      await register(agent, email, 'FlowARestart');
+      const refreshCookie = extractRefreshCookie(
+        await agent.post('/api/auth/refresh').expect(200),
+      );
+
+      // Simulates a backend restart: a brand-new Nest application instance
+      // against the same database, independent of the original app's
+      // in-memory state (there shouldn't be any refresh-relevant state to
+      // lose, since sessions are hashed-at-rest in Postgres).
+      const restarted: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
+      const restartedApp: INestApplication<App> =
+        restarted.createNestApplication();
+      restartedApp.use(cookieParser());
+      restartedApp.setGlobalPrefix('api');
+      restartedApp.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await restartedApp.init();
+      try {
+        await request(restartedApp.getHttpServer())
+          .post('/api/auth/refresh')
+          .set('Cookie', refreshCookie)
+          .expect(200);
+      } finally {
+        await restartedApp.close();
+      }
+    });
   });
 
   describe('Flows B-F - workspaces, invitations, security', () => {

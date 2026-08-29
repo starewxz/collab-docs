@@ -7,6 +7,7 @@ import type {
   MinioConfig,
   PostgresConfig,
   RedisConfig,
+  ThrottleConfig,
 } from './configuration';
 
 /**
@@ -39,6 +40,10 @@ export class AppConfigService {
 
   get billing(): BillingConfig {
     return this.configService.get<BillingConfig>('billing')!;
+  }
+
+  get throttle(): ThrottleConfig {
+    return this.configService.get<ThrottleConfig>('throttle')!;
   }
 
   /** Security-sensitive behavior (secure cookies, hidden error detail, no
